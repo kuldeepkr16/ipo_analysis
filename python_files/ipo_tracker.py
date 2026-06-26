@@ -580,10 +580,10 @@ _HTML_TEMPLATE = """<!doctype html>
 <meta name="description" content="Mainboard and SME IPO dashboard for Indian markets: GMP, subscription breakdown, quick signals.">
 <script>window.IPO_SNAPSHOT={generatedAt:"__GENERATED_AT__",data:__IPO_DATA__};</script>
 <style>
-:root{--bg:#06090F;--surface:#0D1117;--surface-2:#161C26;--border:#1C2333;--border-2:#253047;--accent:#3B82F6;--violet:#8B5CF6;--green:#22C55E;--amber:#F59E0B;--red:#EF4444;--text:#F1F5F9;--text-2:#8B96A8;--text-3:#3D4F6B;--mono:'SF Mono','Cascadia Code','Fira Code',Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+:root{--bg:#EDF2FA;--surface:#FFFFFF;--surface-2:#E4EDF8;--border:#CDD7E8;--border-2:#B8C6DB;--accent:#1D4ED8;--violet:#6D28D9;--green:#15803D;--amber:#B45309;--red:#B91C1C;--text:#0F1E3C;--text-2:#4A5E7A;--text-3:#94A3B8;--mono:'SF Mono','Cascadia Code','Fira Code',Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.5;min-height:100vh}
-.hdr{position:sticky;top:0;z-index:100;background:rgba(6,9,15,.9);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:13px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.hdr{position:sticky;top:0;z-index:100;background:rgba(237,242,250,.95);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:13px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px}
 .hdr-left{display:flex;align-items:baseline;gap:10px}
 .hdr-title{font-size:17px;font-weight:700;letter-spacing:-.025em}
 .hdr-sub{font-size:11px;color:var(--text-3);font-family:var(--mono)}
@@ -614,12 +614,12 @@ thead{background:var(--surface-2)}
 th{padding:9px 11px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);white-space:nowrap;border-bottom:1px solid var(--border);user-select:none}
 td{padding:8px 11px;border-bottom:1px solid var(--border);color:var(--text-2);white-space:nowrap}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:rgba(255,255,255,.018)}
+tr:hover td{background:rgba(29,78,216,.04)}
 .td-name{font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--text);max-width:180px;overflow:hidden;text-overflow:ellipsis}
 .pill{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-family:var(--sans)}
-.p-open{background:rgba(34,197,94,.13);color:var(--green)}
-.p-upcoming{background:rgba(245,158,11,.13);color:var(--amber)}
-.p-closed{background:rgba(61,79,107,.25);color:var(--text-3)}
+.p-open{background:rgba(21,128,61,.1);color:var(--green)}
+.p-upcoming{background:rgba(180,83,9,.1);color:var(--amber)}
+.p-closed{background:rgba(148,163,184,.2);color:var(--text-3)}
 .pos{color:var(--green)}.neg{color:var(--red)}.dim{color:var(--text-3)}.amb{color:var(--amber)}
 .sig{font-family:var(--sans);font-size:11px;font-weight:700}
 .sig-promise{color:var(--green)}.sig-neutral{color:var(--amber)}.sig-caution{color:var(--red)}
