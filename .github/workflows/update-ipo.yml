@@ -2,8 +2,8 @@ name: Update IPO Dashboard
 
 on:
   schedule:
-    # Every 2 hours between 7am–7pm IST (1:30–13:30 UTC) on weekdays
-    - cron: '30 1,3,5,7,9,11,13 * * 1-5'
+    # Every day at 6:00am IST (00:30 UTC)
+    - cron: '30 0 * * *'
   workflow_dispatch:
 
 jobs:
