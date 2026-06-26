@@ -848,6 +848,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 .refresh-btn svg{transition:transform .5s}
 .refresh-btn.spinning svg{animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-6px)}80%{transform:translateX(6px)}}
 #ctrl-stats{margin-left:auto;font-size:11px;color:var(--text-3);font-family:var(--mono)}
 .main{padding:24px;display:flex;flex-direction:column;gap:28px}
 .sec-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
@@ -898,6 +899,22 @@ tr:hover td{background:rgba(29,78,216,.04)}
 </style>
 </head>
 <body>
+<div id="pin-overlay" style="position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;align-items:center;justify-content:center">
+  <div style="text-align:center;display:flex;flex-direction:column;align-items:center;gap:20px">
+    <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      <span style="font-size:15px;font-weight:600;color:var(--text)">IPO Tracker</span>
+      <span style="font-size:12px;color:var(--text-3)">Enter 6-digit PIN to continue</span>
+    </div>
+    <div id="pin-dots" style="display:flex;gap:10px">
+      <span class="pd"></span><span class="pd"></span><span class="pd"></span>
+      <span class="pd"></span><span class="pd"></span><span class="pd"></span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,56px);gap:8px" id="pin-pad"></div>
+    <span id="pin-err" style="font-size:12px;color:#e55;min-height:16px;display:block"></span>
+  </div>
+</div>
+<div id="app" style="display:none">
 <div class="hdr">
   <div class="hdr-left">
     <span class="hdr-title">IPO Tracker</span>
@@ -1227,7 +1244,68 @@ function doRefresh(){
     t.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+' UTC';
   renderContent();
 })();
+
+// PIN lock
+(function(){
+  var _k=atob('MzIxNjU0');  // PIN stored encoded
+  var SK='ipo_ok';
+  if(sessionStorage.getItem(SK)==='1'){unlock();return;}
+  var entered='';
+  var nums=[1,2,3,4,5,6,7,8,9,null,0,null];
+  var pad=document.getElementById('pin-pad');
+  nums.forEach(function(n){
+    var btn=document.createElement('button');
+    if(n===null){btn.style.visibility='hidden';}
+    else{
+      btn.textContent=n;
+      btn.onclick=function(){pushDigit(String(n));};
+    }
+    btn.style.cssText='width:56px;height:52px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:18px;font-weight:500;cursor:pointer;font-family:var(--sans);transition:background .12s';
+    btn.onmouseenter=function(){this.style.background='var(--surface-2)';};
+    btn.onmouseleave=function(){this.style.background='var(--surface)';};
+    pad.appendChild(btn);
+  });
+  document.addEventListener('keydown',function(e){
+    if(e.key>='0'&&e.key<='9')pushDigit(e.key);
+    if(e.key==='Backspace')backspace();
+  });
+  function pushDigit(d){
+    if(entered.length>=6)return;
+    entered+=d;
+    updateDots();
+    if(entered.length===6)setTimeout(checkPin,120);
+  }
+  function backspace(){
+    entered=entered.slice(0,-1);
+    document.getElementById('pin-err').textContent='';
+    updateDots();
+  }
+  function updateDots(){
+    document.querySelectorAll('.pd').forEach(function(dot,i){
+      dot.style.background=i<entered.length?'var(--accent)':'var(--border)';
+    });
+  }
+  function checkPin(){
+    if(entered===_k){sessionStorage.setItem(SK,'1');unlock();}
+    else{
+      document.getElementById('pin-err').textContent='Incorrect PIN. Try again.';
+      entered='';updateDots();
+      var ov=document.getElementById('pin-overlay');
+      ov.style.animation='shake .35s ease';
+      setTimeout(function(){ov.style.animation='';},400);
+    }
+  }
+  function unlock(){
+    document.getElementById('pin-overlay').style.display='none';
+    document.getElementById('app').style.display='';
+  }
+  // init dots
+  document.querySelectorAll('.pd').forEach(function(dot){
+    dot.style.cssText='display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--border);transition:background .12s';
+  });
+})();
 </script>
+</div><!-- /app -->
 </body>
 </html>"""
 
