@@ -843,6 +843,11 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 .tab:hover:not(.active){background:var(--surface-2);color:var(--text)}
 .sel{background:var(--bg);border:1px solid var(--border);color:var(--text-2);font-size:11.5px;padding:4px 10px;border-radius:5px;cursor:pointer;font-family:var(--sans);outline:none}
 .sel:focus{border-color:var(--accent);color:var(--text)}
+.refresh-btn{display:flex;align-items:center;gap:5px;background:var(--bg);border:1px solid var(--border);color:var(--text-2);font-size:11.5px;padding:4px 10px;border-radius:5px;cursor:pointer;font-family:var(--sans);transition:background .15s,color .15s,border-color .15s}
+.refresh-btn:hover{background:var(--surface-2);color:var(--text);border-color:var(--accent)}
+.refresh-btn svg{transition:transform .5s}
+.refresh-btn.spinning svg{animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 #ctrl-stats{margin-left:auto;font-size:11px;color:var(--text-3);font-family:var(--mono)}
 .main{padding:24px;display:flex;flex-direction:column;gap:28px}
 .sec-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
@@ -931,6 +936,10 @@ tr:hover td{background:rgba(29,78,216,.04)}
     <input type="text" id="search-input" placeholder="Search IPO name..." oninput="setSearch(this.value)"
       style="border:1px solid var(--border-2);border-radius:6px;padding:5px 10px;font-size:13px;color:var(--text);background:var(--surface);outline:none;width:180px">
   </div>
+  <button class="refresh-btn" id="refresh-btn" onclick="doRefresh()" title="Reload page to get latest data">
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+    Refresh
+  </button>
   <span id="ctrl-stats" style="margin-left:8px;white-space:nowrap"></span>
 </div>
 <div id="content"></div>
@@ -1202,6 +1211,12 @@ function setStatus(s){
 }
 function setSort(s){sortBy=s;renderContent();}
 function setSearch(v){searchQuery=v;renderContent();}
+function doRefresh(){
+  var btn=document.getElementById('refresh-btn');
+  btn.classList.add('spinning');
+  btn.disabled=true;
+  setTimeout(function(){window.location.reload(true);},300);
+}
 
 (function init(){
   allIpos=loadIpos();
