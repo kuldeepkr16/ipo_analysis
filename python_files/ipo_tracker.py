@@ -1023,19 +1023,24 @@ function listingProfit(ipo){
 }
 
 function profitCell(ipo){
-  // Closed IPOs: show actual listing profit
+  // Closed IPOs: show actual listing profit if available, else fall back to GMP-based
   if(ipo.status==='Closed'){
     var lp=listingProfit(ipo);
-    if(lp===null){
-      // Fall back to showing just the gain% if no lot size
-      if(ipo.listingGainPct!==null&&ipo.listingGainPct!==undefined){
-        var g=parseFloat(ipo.listingGainPct);
-        return'<span class="'+(g>0?'pos':g<0?'neg':'')+'" title="Listing gain % — lot size unavailable">'+(g>0?'+':'')+g.toFixed(1)+'%</span>';
-      }
-      return'<span class="dim">-</span>';
+    if(lp!==null){
+      var cls=lp>0?'tag tag-pos':lp<0?'tag tag-neg':'';
+      return'<span class="'+cls+'" title="Actual listing day profit">'+(lp>0?'+':'')+fmtMoney(Math.round(lp))+'</span>';
     }
-    var cls=lp>0?'tag tag-pos':lp<0?'tag tag-neg':'';
-    return'<span class="'+cls+'" title="Actual listing day profit">'+(lp>0?'+':'')+fmtMoney(Math.round(lp))+'</span>';
+    // Listing gain% available but no lot size — show %
+    if(ipo.listingGainPct!==null&&ipo.listingGainPct!==undefined){
+      var g=parseFloat(ipo.listingGainPct);
+      return'<span class="'+(g>0?'pos':g<0?'neg':'')+'" title="Listing gain % — lot size unavailable">'+(g>0?'+':'')+g.toFixed(1)+'%</span>';
+    }
+    // Not listed yet — fall back to GMP-based expected profit (same as Open/Upcoming)
+    if(ipo.expectedProfit!==null&&ipo.expectedProfit!==undefined){
+      var v=parseFloat(ipo.expectedProfit);
+      return'<span class="'+(v>0?'tag tag-pos':v<0?'tag tag-neg':'')+'" title="Expected profit based on GMP (not yet listed)">'+(v>0?'+':'')+fmtMoney(v)+'</span>';
+    }
+    return'<span class="dim">-</span>';
   }
   if(ipo.expectedProfit===null||ipo.expectedProfit===undefined)return'<span class="dim">-</span>';
   var v=parseFloat(ipo.expectedProfit);
@@ -1043,11 +1048,16 @@ function profitCell(ipo){
 }
 
 function roiCell(ipo){
-  // Closed IPOs: actual ROI = listing_gain_pct
+  // Closed IPOs: actual ROI = listing_gain_pct; if not listed yet, fall back to GMP-based
   if(ipo.status==='Closed'){
     if(ipo.listingGainPct!==null&&ipo.listingGainPct!==undefined){
       var g=parseFloat(ipo.listingGainPct);
       return'<span class="'+(g>0?'pos':g<0?'neg':'')+'" style="font-weight:600" title="Actual listing day ROI">'+(g>0?'+':'')+g.toFixed(1)+'%</span>';
+    }
+    // Not listed yet — show GMP-based ROI
+    if(ipo.roiPct!==null&&ipo.roiPct!==undefined){
+      var v=parseFloat(ipo.roiPct);
+      return'<span class="'+(v>0?'pos':v<0?'neg':'')+'" style="font-weight:600" title="Expected ROI based on GMP (not yet listed)">'+v.toFixed(1)+'%</span>';
     }
     return'<span class="dim">-</span>';
   }
