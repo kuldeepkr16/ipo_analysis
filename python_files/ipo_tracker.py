@@ -222,9 +222,10 @@ def fetch_investorgain(year: int) -> list[IPO]:
         gmp_match = re.search(r"<b>(-?[\d.]+|--)</b>\s*\(([-\d.]+)%\)", gmp_text)
         gmp = None if not gmp_match or gmp_match.group(1) == "--" else float(gmp_match.group(1))
         gmp_pct = float(gmp_match.group(2)) if gmp_match and gmp is not None else None
-        range_match = re.search(r"<b>(-?[\d.]+)\s*\\u2193\s*/\s*(-?[\d.]+)\s*\\u2191</b>", gmp_text)
-        if not range_match:
-            range_match = re.search(r"<b>(-?[\d.]+)\s*↓\s*/\s*(-?[\d.]+)\s*↑</b>", gmp_text)
+        range_match = re.search(
+            r"<b>(-?[\d.]+)\s*(?:\\u2193|↓)\s*/\s*(-?[\d.]+)\s*(?:\\u2191|↑)</b>",
+            gmp_text,
+        )
         gmp_low = float(range_match.group(1)) if range_match else gmp
         gmp_high = float(range_match.group(2)) if range_match else gmp
 
@@ -375,10 +376,16 @@ def build_ipo_list(year: int) -> list[IPO]:
 
         cg = cg_combined.get(key)
         if cg:
-            ipo.qib_sub = cg["qib_sub"]
-            ipo.nii_sub = cg["nii_sub"]
-            ipo.retail_sub = cg["retail_sub"]
-            ipo.emp_sub = cg["emp_sub"]
+            def _f(v: object) -> Optional[float]:
+                try:
+                    return float(v) if v is not None else None
+                except (ValueError, TypeError):
+                    return None
+
+            ipo.qib_sub = _f(cg["qib_sub"])
+            ipo.nii_sub = _f(cg["nii_sub"])
+            ipo.retail_sub = _f(cg["retail_sub"])
+            ipo.emp_sub = _f(cg["emp_sub"])
             ipo.applications = cg["applications"]
             ipo.sources.add("chittorgarh")
 
@@ -531,6 +538,309 @@ def save_csv(ipos: list[IPO], path: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# HTML output (for GitHub Pages / static deployment)
+# --------------------------------------------------------------------------- #
+
+def ipo_to_dict(ipo: IPO) -> dict:
+    return {
+        "name": ipo.name,
+        "category": ipo.category,
+        "status": ipo.status,
+        "openDate":    ipo.open_date.isoformat()    if ipo.open_date    else None,
+        "closeDate":   ipo.close_date.isoformat()   if ipo.close_date   else None,
+        "boaDate":     ipo.boa_date.isoformat()     if ipo.boa_date     else None,
+        "listingDate": ipo.listing_date.isoformat() if ipo.listing_date else None,
+        "priceLow":    ipo.price_low,
+        "priceHigh":   ipo.price_high,
+        "lotSize":     ipo.lot_size,
+        "issueSizeCr": ipo.issue_size_cr,
+        "pe":          ipo.pe,
+        "gmp":         ipo.gmp,
+        "gmpPct":      ipo.gmp_pct,
+        "gmpLow":      ipo.gmp_low,
+        "gmpHigh":     ipo.gmp_high,
+        "rating":      ipo.rating,
+        "anchor":      ipo.anchor,
+        "overallSub":  ipo.overall_sub,
+        "qibSub":      ipo.qib_sub,
+        "niiSub":      ipo.nii_sub,
+        "retailSub":   ipo.retail_sub,
+        "empSub":      ipo.emp_sub,
+        "applications": ipo.applications,
+        "sources":     sorted(ipo.sources),
+    }
+
+
+_HTML_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IPO Tracker — India</title>
+<meta name="description" content="Mainboard and SME IPO dashboard for Indian markets: GMP, subscription breakdown, quick signals.">
+<script>window.IPO_SNAPSHOT={generatedAt:"__GENERATED_AT__",data:__IPO_DATA__};</script>
+<style>
+:root{--bg:#06090F;--surface:#0D1117;--surface-2:#161C26;--border:#1C2333;--border-2:#253047;--accent:#3B82F6;--violet:#8B5CF6;--green:#22C55E;--amber:#F59E0B;--red:#EF4444;--text:#F1F5F9;--text-2:#8B96A8;--text-3:#3D4F6B;--mono:'SF Mono','Cascadia Code','Fira Code',Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13px;line-height:1.5;min-height:100vh}
+.hdr{position:sticky;top:0;z-index:100;background:rgba(6,9,15,.9);backdrop-filter:blur(14px);border-bottom:1px solid var(--border);padding:13px 24px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+.hdr-left{display:flex;align-items:baseline;gap:10px}
+.hdr-title{font-size:17px;font-weight:700;letter-spacing:-.025em}
+.hdr-sub{font-size:11px;color:var(--text-3);font-family:var(--mono)}
+.hdr-right{display:flex;align-items:center;gap:12px}
+.updated{font-size:11px;font-family:var(--mono);color:var(--text-3);display:flex;align-items:center;gap:6px}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
+.gh-badge{font-size:10.5px;padding:4px 10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--border-2);color:var(--text-3);text-decoration:none;display:flex;align-items:center;gap:5px;transition:color .12s}
+.gh-badge:hover{color:var(--text)}
+.controls{padding:12px 24px;display:flex;align-items:center;gap:16px;flex-wrap:wrap;border-bottom:1px solid var(--border);background:var(--surface)}
+.ctrl-label{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--text-3)}
+.tab-group{display:flex;background:var(--bg);border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.tab{background:none;border:none;border-right:1px solid var(--border);color:var(--text-2);font-size:11.5px;padding:4px 12px;cursor:pointer;font-family:var(--sans);transition:background .1s,color .1s}
+.tab:last-child{border-right:none}
+.tab.active{background:var(--accent);color:#fff}
+.tab:hover:not(.active){background:var(--surface-2);color:var(--text)}
+.sel{background:var(--bg);border:1px solid var(--border);color:var(--text-2);font-size:11.5px;padding:4px 10px;border-radius:5px;cursor:pointer;font-family:var(--sans);outline:none}
+.sel:focus{border-color:var(--accent);color:var(--text)}
+#ctrl-stats{margin-left:auto;font-size:11px;color:var(--text-3);font-family:var(--mono)}
+.main{padding:24px;display:flex;flex-direction:column;gap:28px}
+.sec-hdr{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.sec-stripe{display:inline-block;width:3px;height:16px;border-radius:2px}
+.sec-title{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--text-2)}
+.sec-count{font-size:10px;font-family:var(--mono);color:var(--text-3);background:var(--surface-2);border:1px solid var(--border);padding:1px 6px;border-radius:8px}
+.tbl-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:7px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-family:var(--mono);font-size:12px;min-width:1480px}
+thead{background:var(--surface-2)}
+th{padding:9px 11px;text-align:left;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3);white-space:nowrap;border-bottom:1px solid var(--border);user-select:none}
+td{padding:8px 11px;border-bottom:1px solid var(--border);color:var(--text-2);white-space:nowrap}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.018)}
+.td-name{font-family:var(--sans);font-size:12.5px;font-weight:500;color:var(--text);max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.pill{display:inline-flex;align-items:center;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-family:var(--sans)}
+.p-open{background:rgba(34,197,94,.13);color:var(--green)}
+.p-upcoming{background:rgba(245,158,11,.13);color:var(--amber)}
+.p-closed{background:rgba(61,79,107,.25);color:var(--text-3)}
+.pos{color:var(--green)}.neg{color:var(--red)}.dim{color:var(--text-3)}.amb{color:var(--amber)}
+.sig{font-family:var(--sans);font-size:11px;font-weight:700}
+.sig-promise{color:var(--green)}.sig-neutral{color:var(--amber)}.sig-caution{color:var(--red)}
+.str-exc{color:var(--green);font-weight:700}.str-str{color:#86EFAC}.str-avg{color:var(--amber)}.str-wk{color:var(--red)}
+.empty-row td{text-align:center;padding:28px;color:var(--text-3);font-family:var(--sans);font-style:italic;font-size:12px}
+.disclaimer{margin:0 24px 28px;padding:11px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.65}
+.src-badges{display:flex;gap:3px}
+.src{font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface-2);color:var(--text-3);font-family:var(--sans);text-transform:uppercase;letter-spacing:.04em}
+@media(max-width:768px){.hdr{padding:11px 16px}.controls{padding:10px 16px}.main{padding:16px;gap:20px}.hdr-sub{display:none}}
+</style>
+</head>
+<body>
+<div class="hdr">
+  <div class="hdr-left">
+    <span class="hdr-title">IPO Tracker</span>
+    <span class="hdr-sub">India · Mainboard &amp; SME</span>
+  </div>
+  <div class="hdr-right">
+    <span class="updated" id="updated-label">—</span>
+    <a class="gh-badge" href="https://github.com" target="_blank" rel="noopener">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+      Auto-updated via GitHub Actions
+    </a>
+  </div>
+</div>
+<div class="controls">
+  <div style="display:flex;align-items:center;gap:8px">
+    <span class="ctrl-label">Status</span>
+    <div class="tab-group" id="status-tabs">
+      <button class="tab active" data-s="open"     onclick="setStatus('open')">Open</button>
+      <button class="tab"        data-s="upcoming" onclick="setStatus('upcoming')">Upcoming</button>
+      <button class="tab"        data-s="closed"   onclick="setStatus('closed')">Closed</button>
+      <button class="tab"        data-s="all"      onclick="setStatus('all')">All</button>
+    </div>
+  </div>
+  <div style="display:flex;align-items:center;gap:8px">
+    <span class="ctrl-label">Sort</span>
+    <select class="sel" onchange="setSort(this.value)">
+      <option value="gmp">GMP %</option>
+      <option value="subscription">Subscription</option>
+      <option value="close_date">Close Date</option>
+      <option value="rating">Rating</option>
+      <option value="name">Name</option>
+    </select>
+  </div>
+  <span id="ctrl-stats" style="margin-left:auto"></span>
+</div>
+<div id="content"></div>
+<script>
+var allIpos=[],statusFilter='open',sortBy='gmp';
+var snap=window.IPO_SNAPSHOT;
+
+function parseD(s){if(!s)return null;var d=new Date(s+'T00:00:00');return isNaN(d.getTime())?null:d;}
+function today(){var d=new Date();d.setHours(0,0,0,0);return d;}
+function fmtDate(d){return d?d.toLocaleDateString('en-IN',{day:'2-digit',month:'short'}):'-';}
+function toFloat(v){if(v===null||v===undefined||v==='')return null;var n=parseFloat(v);return isNaN(n)?null:n;}
+function bdays(s,e){if(!s||!e||e<s)return 0;var n=0,c=new Date(s);while(c<=e){var d=c.getDay();if(d&&d<6)n++;c.setDate(c.getDate()+1);}return n;}
+function normName(n){return n.toLowerCase().replace(/\\b(ltd|limited|ipo|the)\\b/g,'').replace(/[^a-z0-9]+/g,'');}
+
+function loadIpos(){
+  return snap.data.map(function(d){
+    return Object.assign({},d,{
+      openDate:parseD(d.openDate),closeDate:parseD(d.closeDate),
+      boaDate:parseD(d.boaDate),listingDate:parseD(d.listingDate),
+      sources:new Set(d.sources||[])
+    });
+  });
+}
+
+function minInv(ipo){return(ipo.priceHigh!==null&&ipo.lotSize!==null)?Math.round(ipo.priceHigh*ipo.lotSize):null;}
+function dayLabel(ipo){
+  var now=today();
+  if(!ipo.openDate||!ipo.closeDate)return'-';
+  var tot=bdays(ipo.openDate,ipo.closeDate);
+  if(ipo.status==='Open'){var e=now<ipo.closeDate?now:ipo.closeDate;return'Day '+bdays(ipo.openDate,e)+'/'+tot;}
+  if(ipo.status==='Upcoming')return'Opens '+fmtDate(ipo.openDate);
+  return'Closed';
+}
+function subStr(ipo){
+  if(ipo.overallSub===null)return'-';
+  if(ipo.overallSub<1)return'Weak';
+  if(ipo.overallSub<3)return'Average';
+  if(ipo.overallSub<10)return'Strong';
+  return'Exceptional';
+}
+function gmpTrend(ipo){
+  if(ipo.gmp===null||ipo.gmpLow===null||ipo.gmpHigh===null)return'-';
+  if(ipo.gmpHigh===ipo.gmpLow)return'Flat';
+  var p=(ipo.gmp-ipo.gmpLow)/(ipo.gmpHigh-ipo.gmpLow);
+  return p>=0.66?'Rising':p<=0.33?'Falling':'Mixed';
+}
+function quickSig(ipo){
+  if(ipo.overallSub===null)return'-';
+  var sc={Weak:0,Average:1,Strong:2,Exceptional:3}[subStr(ipo)]||0;
+  if(ipo.gmpPct!==null){if(ipo.gmpPct<0)sc-=2;else if(ipo.gmpPct>=20)sc+=2;else if(ipo.gmpPct>=5)sc+=1;}
+  return sc>=3?'Promising':sc<=0?'Caution':'Neutral';
+}
+
+var fmtMoney=function(v){return v!==null?'\\u20b9'+v.toLocaleString('en-IN'):'-';};
+var fmtSub=function(v){return v!==null?v.toFixed(2)+'x':'-';};
+
+function sPill(s){var c={Open:'p-open',Upcoming:'p-upcoming',Closed:'p-closed'}[s]||'p-closed';return'<span class="pill '+c+'">'+s+'</span>';}
+function gmpCell(ipo){
+  if(ipo.gmp===null)return'<span class="dim">-</span>';
+  var cls=ipo.gmp>0?'pos':ipo.gmp<0?'neg':'';
+  var pct=ipo.gmpPct!==null?' <span style="opacity:.6">('+ipo.gmpPct.toFixed(1)+'%)</span>':'';
+  return'<span class="'+cls+'">₹'+ipo.gmp.toFixed(0)+pct+'</span>';
+}
+function strCell(ipo){var s=subStr(ipo);var c={Exceptional:'str-exc',Strong:'str-str',Average:'str-avg',Weak:'str-wk'}[s]||'dim';return'<span class="'+c+'">'+s+'</span>';}
+function sigCell(ipo){var s=quickSig(ipo);if(s==='-')return'<span class="dim">-</span>';var c={Promising:'sig-promise',Neutral:'sig-neutral',Caution:'sig-caution'}[s];return'<span class="sig '+c+'">'+s+'</span>';}
+function trendCell(ipo){var t=gmpTrend(ipo);if(t==='-')return'<span class="dim">-</span>';var arr={Rising:'\\u2191',Falling:'\\u2193',Flat:'\\u2192',Mixed:'\\u2248'}[t]||'';var c={Rising:'pos',Falling:'neg',Flat:'dim',Mixed:'amb'}[t]||'';return'<span class="'+c+'">'+arr+' '+t+'</span>';}
+function priceBand(ipo){
+  if(!ipo.priceLow&&!ipo.priceHigh)return'-';
+  if(ipo.priceLow&&ipo.priceHigh&&ipo.priceLow!==ipo.priceHigh)return ipo.priceLow.toFixed(0)+'\\u2013'+ipo.priceHigh.toFixed(0);
+  return(ipo.priceHigh||ipo.priceLow).toFixed(0);
+}
+
+function applyFilters(ipos){return statusFilter==='all'?ipos:ipos.filter(function(i){return i.status.toLowerCase()===statusFilter;});}
+function sortIpos(ipos){
+  var a=ipos.slice();
+  if(sortBy==='gmp')a.sort(function(x,y){return(y.gmpPct!=null?y.gmpPct:-999)-(x.gmpPct!=null?x.gmpPct:-999);});
+  else if(sortBy==='subscription')a.sort(function(x,y){return(y.overallSub!=null?y.overallSub:-1)-(x.overallSub!=null?x.overallSub:-1);});
+  else if(sortBy==='close_date')a.sort(function(x,y){return(x.closeDate?x.closeDate.getTime():Infinity)-(y.closeDate?y.closeDate.getTime():Infinity);});
+  else if(sortBy==='rating')a.sort(function(x,y){return(y.rating||0)-(x.rating||0);});
+  else a.sort(function(x,y){return x.name.localeCompare(y.name);});
+  return a;
+}
+
+function renderSection(ipos,category){
+  var list=sortIpos(applyFilters(ipos.filter(function(i){return i.category===category;})));
+  var color=category==='Mainboard'?'var(--accent)':'var(--violet)';
+  var rows=list.length===0
+    ?'<tr class="empty-row"><td colspan="20">No '+category+' IPOs match current filters.</td></tr>'
+    :list.map(function(ipo){
+      var mi=minInv(ipo);
+      var srcs=[...ipo.sources].map(function(s){return'<span class="src">'+s+'</span>';}).join('');
+      return'<tr>'
+        +'<td class="td-name" title="'+ipo.name+'">'+ipo.name+'</td>'
+        +'<td>'+sPill(ipo.status)+'</td>'
+        +'<td>'+dayLabel(ipo)+'</td>'
+        +'<td>'+fmtDate(ipo.openDate)+' \\u2192 '+fmtDate(ipo.closeDate)+'</td>'
+        +'<td>'+fmtDate(ipo.listingDate)+'</td>'
+        +'<td>'+priceBand(ipo)+'</td>'
+        +'<td>'+(ipo.lotSize!=null?ipo.lotSize:'-')+'</td>'
+        +'<td>'+(mi!==null?fmtMoney(mi):'-')+'</td>'
+        +'<td>'+(ipo.issueSizeCr!==null?'\\u20b9'+ipo.issueSizeCr.toFixed(1)+'Cr':'-')+'</td>'
+        +'<td>'+fmtSub(ipo.overallSub)+'</td>'
+        +'<td>'+fmtSub(ipo.qibSub)+'</td>'
+        +'<td>'+fmtSub(ipo.niiSub)+'</td>'
+        +'<td>'+fmtSub(ipo.retailSub)+'</td>'
+        +'<td>'+strCell(ipo)+'</td>'
+        +'<td>'+gmpCell(ipo)+'</td>'
+        +'<td>'+trendCell(ipo)+'</td>'
+        +'<td>'+(ipo.rating?'\\ud83d\\udd25'.repeat(ipo.rating):'<span class="dim">-</span>')+'</td>'
+        +'<td>'+(ipo.pe!==null?ipo.pe.toFixed(1)+'x':'<span class="dim">-</span>')+'</td>'
+        +'<td>'+sigCell(ipo)+'</td>'
+        +'<td><div class="src-badges">'+srcs+'</div></td>'
+        +'</tr>';
+    }).join('');
+  return'<div>'
+    +'<div class="sec-hdr">'
+    +'<span class="sec-stripe" style="background:'+color+'"></span>'
+    +'<span class="sec-title">'+category.toUpperCase()+'</span>'
+    +'<span class="sec-count">'+list.length+'</span>'
+    +'</div>'
+    +'<div class="tbl-wrap"><table>'
+    +'<thead><tr>'
+    +'<th>Company</th><th>Status</th><th>Day</th><th>Open \\u2192 Close</th>'
+    +'<th>Listing</th><th>Price Band</th><th>Lot</th><th>Min Invest</th>'
+    +'<th>Issue Size</th><th>Overall Sub</th><th>QIB</th><th>NII</th>'
+    +'<th>Retail</th><th>Sub Strength</th><th>GMP</th><th>GMP Trend</th>'
+    +'<th>Rating</th><th>P/E</th><th>Quick Signal \\u26a0</th><th>Sources</th>'
+    +'</tr></thead>'
+    +'<tbody>'+rows+'</tbody></table></div></div>';
+}
+
+function renderContent(){
+  var filtered=applyFilters(allIpos);
+  var mb=filtered.filter(function(i){return i.category==='Mainboard';}).length;
+  var sme=filtered.filter(function(i){return i.category==='SME';}).length;
+  document.getElementById('ctrl-stats').textContent=mb+' mainboard \\u00b7 '+sme+' SME';
+  document.getElementById('content').innerHTML=
+    '<div class="main">'+renderSection(allIpos,'Mainboard')+renderSection(allIpos,'SME')+'</div>'
+    +'<div class="disclaimer">\\u26a0 <strong>Quick Signal</strong> is a heuristic from live GMP% + subscription only \\u2014 not a fundamentals-based Apply/Skip call. No revenue, valuation, or peer data included. Data sourced from InvestorGain and Chittorgarh. Updated automatically every 2 hours via GitHub Actions.</div>';
+}
+
+function setStatus(s){
+  statusFilter=s;
+  document.querySelectorAll('#status-tabs .tab').forEach(function(b){b.classList.toggle('active',b.dataset.s===s);});
+  renderContent();
+}
+function setSort(s){sortBy=s;renderContent();}
+
+(function init(){
+  allIpos=loadIpos();
+  var t=new Date(snap.generatedAt);
+  document.getElementById('updated-label').innerHTML=
+    '<span class="live-dot"></span> '+
+    t.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' '+
+    t.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+' UTC';
+  renderContent();
+})();
+</script>
+</body>
+</html>"""
+
+
+def save_html(ipos: list[IPO], path: str) -> None:
+    import json
+    import os
+    from datetime import datetime, timezone
+
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    data_json = json.dumps([ipo_to_dict(i) for i in ipos], ensure_ascii=False)
+    html = _HTML_TEMPLATE.replace("__GENERATED_AT__", generated_at).replace("__IPO_DATA__", data_json)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(html)
+
+
+# --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
 
@@ -545,6 +855,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--sort-by", choices=["gmp", "subscription", "close_date", "rating", "name"], default="gmp")
     p.add_argument("--year", type=int, default=date.today().year, help="IPO calendar year to query")
     p.add_argument("--save-csv", metavar="DIR", default=None, help="Also save Mainboard/SME tables as CSV files in this directory")
+    p.add_argument("--output-html", metavar="PATH", default=None,
+                   help="Write a self-contained HTML dashboard to this path (for GitHub Pages)")
     return p.parse_args()
 
 
@@ -564,13 +876,18 @@ def main() -> None:
     sme = sort_ipos([i for i in filtered if i.category == "SME"], args.sort_by)
     combined = mainboard + sme
 
-    render_table(combined, f"Mainboard + SME IPOs — status={args.status}", console)
+    render_table(mainboard, f"Mainboard IPOs — status={args.status}", console)
+    render_table(sme, f"SME IPOs — status={args.status}", console)
 
     if args.save_csv:
         import os
         os.makedirs(args.save_csv, exist_ok=True)
         save_csv(combined, os.path.join(args.save_csv, "ipos.csv"))
         console.print(f"\n[dim]Saved CSV to {args.save_csv}/[/dim]")
+
+    if args.output_html:
+        save_html(ipos, args.output_html)
+        console.print(f"[dim]Saved HTML dashboard to {args.output_html}[/dim]")
 
 
 if __name__ == "__main__":
