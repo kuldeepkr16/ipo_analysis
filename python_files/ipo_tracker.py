@@ -301,6 +301,12 @@ def fetch_chittorgarh_ipos(year: int) -> list[IPO]:
 
         status = compute_status(open_date, close_date)
 
+        slug = row.get("~URLRewrite_Folder_Name", "")
+        # ID is in the Company HTML href: /ipo/slug/ID/
+        company_html = row.get("Company", "")
+        id_match = re.search(r'/ipo/[^/]+/(\d+)/', company_html)
+        cg_id = id_match.group(1) if id_match else ""
+
         ipo = IPO(
             name=name,
             category=category,
@@ -312,6 +318,8 @@ def fetch_chittorgarh_ipos(year: int) -> list[IPO]:
             price_high=price_high,
             issue_size_cr=issue_cr,
         )
+        # Store slug+id so scrape_lot_size can build the correct URL
+        ipo._cg_slug = f"{slug}/{cg_id}" if slug and cg_id else slug  # type: ignore[attr-defined]
         ipo.sources.add("chittorgarh")
         ipos.append(ipo)
 
@@ -473,7 +481,30 @@ def fetch_chittorgarh_listing(year: int) -> dict[str, dict]:
 
 
 # --------------------------------------------------------------------------- #
-# Source 5: Groww IPO page (__NEXT_DATA__ embedded JSON) — kept for reference
+# Source 5: Chittorgarh individual page — lot size scraper (for closed IPOs)
+# --------------------------------------------------------------------------- #
+
+def scrape_lot_size(slug: str) -> Optional[int]:
+    """Scrape lot size from Chittorgarh individual IPO page.
+    Only called for recently closed IPOs missing lot size from InvestorGain."""
+    try:
+        url = f"https://www.chittorgarh.com/ipo/{slug}/"
+        resp = requests.get(url, headers=CG_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        text = resp.text[:100000]
+        # CG format: "Lot Size</...><td...><span...>1,000 Shares</span>"
+        m = re.search(r'[Ll]ot\s+[Ss]ize.*?>([\d,]+)\s*[Ss]hares?', text, re.DOTALL)
+        if not m:
+            m = re.search(r'minimum of ([\d,]+)\s*[Ss]hares?', text, re.IGNORECASE)
+        if m:
+            return int(m.group(1).replace(",", ""))
+    except (requests.RequestException, ValueError):
+        pass
+    return None
+
+
+# --------------------------------------------------------------------------- #
+# Source 6: Groww IPO page (__NEXT_DATA__ embedded JSON) — kept for reference
 # --------------------------------------------------------------------------- #
 
 def fetch_groww() -> dict[str, dict]:
@@ -583,6 +614,25 @@ def build_ipo_list(year: int) -> list[IPO]:
             ipo.listing_open_price = lst.get("listing_open_price")
             ipo.listing_close_price = lst.get("listing_close_price")
             ipo.listing_gain_pct = lst.get("listing_gain_pct")
+
+    # Scrape lot size from individual CG pages for recently closed IPOs that
+    # have listing data but no lot size (so we can show ₹ profit, not just %).
+    # Limit to IPOs closed within last 45 days to keep runtime reasonable.
+    cutoff = date.today().replace(day=max(1, date.today().day - 45))
+    needs_lot = [
+        ipo for ipo in ipos
+        if ipo.lot_size is None
+        and ipo.listing_gain_pct is not None
+        and ipo.close_date is not None
+        and ipo.close_date >= cutoff
+        and getattr(ipo, "_cg_slug", "")
+    ]
+    for ipo in needs_lot:
+        slug = getattr(ipo, "_cg_slug", "")
+        if slug:
+            lot = scrape_lot_size(slug)
+            if lot:
+                ipo.lot_size = lot
 
     return ipos
 
@@ -965,14 +1015,10 @@ function subCell(ipo){
 
 function listingProfit(ipo){
   // Actual profit on listing: listing_gain_pct% of (issue price × lot size)
+  // Returns null when lot size unknown — caller will show gain% instead
   if(ipo.listingGainPct===null||ipo.listingGainPct===undefined)return null;
   var mi=minInv(ipo);
-  if(mi===null){
-    // No lot size — compute approximate if we have listing open price
-    if(ipo.listingOpenPrice!==null&&ipo.priceHigh!==null)
-      return(ipo.listingGainPct/100)*ipo.priceHigh; // per share, not per lot
-    return null;
-  }
+  if(mi===null)return null;
   return(ipo.listingGainPct/100)*mi;
 }
 
