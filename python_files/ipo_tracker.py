@@ -240,25 +240,106 @@ def compute_status(open_date: Optional[date], close_date: Optional[date]) -> str
 
 
 # --------------------------------------------------------------------------- #
-# Source 1: InvestorGain combined report (Mainboard + SME, one call)
+# Source 1: Chittorgarh report 82 — comprehensive IPO list (primary)
 # --------------------------------------------------------------------------- #
 
-def fetch_investorgain(year: int) -> list[IPO]:
+def fetch_chittorgarh_ipos(year: int) -> list[IPO]:
+    """Fetch all IPOs from Chittorgarh report 82 — ~4× more coverage than
+    InvestorGain, includes SME IPOs that IG misses."""
+    fy = f"{year}-{str(year + 1)[-2:]}"
+    url = (
+        f"https://webnodejs.chittorgarh.com/cloud/report/data-read/"
+        f"82/1/6/{year}/{fy}/0/all/0"
+    )
+    try:
+        resp = requests.get(url, headers=CG_HEADERS, params={"search": ""}, timeout=TIMEOUT)
+        resp.raise_for_status()
+        rows = resp.json().get("reportTableData", [])
+    except (requests.RequestException, ValueError):
+        return []
+
+    ipos = []
+    for row in rows:
+        # ~IPO field gives clean "Company Name IPO" string
+        raw_name = row.get("~IPO", "")
+        if not raw_name:
+            company_html = row.get("Company", "")
+            raw_name = strip_html(re.sub(r'<span[^>]*>.*?</span>', '', company_html))
+        name = re.sub(r"\s+IPO\s*$", "", raw_name, flags=re.IGNORECASE).strip()
+        name = re.sub(r"\s+(Ltd\.?|Limited)\.?\s*$", "", name).strip()
+        if not name:
+            continue
+
+        cat_str = row.get("Issue Category", "").strip()
+        category = "Mainboard" if cat_str in ("IPO", "Mainboard") else "SME"
+
+        # Price band: "161.00 to 170.00" or single "149.00"
+        price_str = str(row.get("Issue Price (Rs.)", "") or "")
+        price_low, price_high = None, None
+        pm = re.search(r'([\d.]+)\s*(?:to|-)\s*([\d.]+)', price_str)
+        if pm:
+            price_low, price_high = float(pm.group(1)), float(pm.group(2))
+        else:
+            pm2 = re.search(r'([\d.]+)', price_str)
+            if pm2:
+                price_low = price_high = float(pm2.group(1))
+
+        open_date = parse_iso_date(row.get("~Issue_Open_Date"))
+        close_date = parse_iso_date(row.get("~IssueCloseDate"))
+        listing_date = parse_iso_date(row.get("~ListingDate"))
+
+        issue_cr = None
+        try:
+            amt = row.get("Total Issue Amount (Incl.Firm reservations) (Rs.cr.)")
+            if amt:
+                issue_cr = float(amt)
+        except (ValueError, TypeError):
+            pass
+
+        status = compute_status(open_date, close_date)
+
+        ipo = IPO(
+            name=name,
+            category=category,
+            status=status,
+            open_date=open_date,
+            close_date=close_date,
+            listing_date=listing_date,
+            price_low=price_low,
+            price_high=price_high,
+            issue_size_cr=issue_cr,
+        )
+        ipo.sources.add("chittorgarh")
+        ipos.append(ipo)
+
+    return ipos
+
+
+# --------------------------------------------------------------------------- #
+# Source 2: InvestorGain — GMP + lot size lookup (supplement)
+# --------------------------------------------------------------------------- #
+
+def fetch_investorgain_lookup(year: int) -> dict[str, dict]:
+    """Returns a dict keyed by normalize_name(company) with GMP, lot size,
+    overall subscription, rating from InvestorGain (~30 recent IPOs)."""
     fy = f"{year}-{str(year + 1)[-2:]}"
     url = (
         f"https://webnodejs.investorgain.com/cloud/v2/report/data-read/"
         f"331/1/6/{year}/{fy}/0/all"
     )
-    resp = requests.get(url, headers=IG_HEADERS, params={"search": ""}, timeout=TIMEOUT)
-    resp.raise_for_status()
-    rows = resp.json().get("reportTableData", [])
+    try:
+        resp = requests.get(url, headers=IG_HEADERS, params={"search": ""}, timeout=TIMEOUT)
+        resp.raise_for_status()
+        rows = resp.json().get("reportTableData", [])
+    except (requests.RequestException, ValueError):
+        return {}
 
-    ipos = []
+    result = {}
     for row in rows:
         name = row.get("~ipo_name", "").strip()
         if not name:
             continue
-        category = "Mainboard" if row.get("~IPO_Category") == "IPO" else "SME"
+        key = normalize_name(name)
 
         gmp_text = row.get("GMP", "")
         gmp_match = re.search(r"<b>(-?[\d.]+|--)</b>\s*\(([-\d.]+)%\)", gmp_text)
@@ -278,47 +359,32 @@ def fetch_investorgain(year: int) -> list[IPO]:
             if m:
                 overall_sub = float(m.group(1))
 
-        price = row.get("Price (₹)") or row.get("Price (₹)")
-        price = float(price) if price else None
-
         lot = row.get("Lot")
-        lot = int(lot) if lot else None
+        try:
+            lot = int(lot) if lot else None
+        except (ValueError, TypeError):
+            lot = None
 
         rating_html = row.get("Rating", "")
         rating = rating_html.count("&#128293;") or None
 
-        open_date = parse_iso_date(row.get("~Srt_Open"))
-        close_date = parse_iso_date(row.get("~Srt_Close"))
-        status = compute_status(open_date, close_date)
-
-        ipo = IPO(
-            name=name,
-            category=category,
-            status=status,
-            open_date=open_date,
-            close_date=close_date,
-            boa_date=parse_iso_date(row.get("~Srt_BoA_Dt")),
-            listing_date=parse_iso_date(row.get("~Str_Listing")),
-            price_low=price,
-            price_high=price,
-            lot_size=lot,
-            issue_size_cr=parse_money_cr(row.get("IPO Size", "")),
-            pe=float(row["~P/E"]) if row.get("~P/E") not in (None, "--", "") else None,
-            gmp=gmp,
-            gmp_pct=gmp_pct,
-            gmp_low=gmp_low,
-            gmp_high=gmp_high,
-            rating=rating,
-            anchor="check" in row.get("Anchor", "").lower() or "✅" in row.get("Anchor", ""),
-            overall_sub=overall_sub,
-        )
-        ipo.sources.add("investorgain")
-        ipos.append(ipo)
-    return ipos
+        result[key] = {
+            "gmp": gmp,
+            "gmp_pct": gmp_pct,
+            "gmp_low": gmp_low,
+            "gmp_high": gmp_high,
+            "lot_size": lot,
+            "overall_sub": overall_sub,
+            "rating": rating,
+            "anchor": "check" in row.get("Anchor", "").lower() or "✅" in row.get("Anchor", ""),
+            "pe": float(row["~P/E"]) if row.get("~P/E") not in (None, "--", "") else None,
+            "boa_date": parse_iso_date(row.get("~Srt_BoA_Dt")),
+        }
+    return result
 
 
 # --------------------------------------------------------------------------- #
-# Source 2: Chittorgarh subscription breakdown (mainboard + sme, two calls)
+# Source 3: Chittorgarh subscription breakdown (mainboard + sme, two calls)
 # --------------------------------------------------------------------------- #
 
 def fetch_chittorgarh_subscription(year: int, segment: str) -> dict[str, dict]:
@@ -345,6 +411,7 @@ def fetch_chittorgarh_subscription(year: int, segment: str) -> dict[str, dict]:
             "nii_sub": row.get("NII (x)") or None,
             "retail_sub": row.get("Retail (x)") or None,
             "emp_sub": row.get("Employee (x)") or None,
+            "total_sub": row.get("Total (x)") or None,
             "applications": row.get("Applications") or None,
         }
     return result
@@ -405,43 +472,53 @@ def fetch_groww() -> dict[str, dict]:
 # --------------------------------------------------------------------------- #
 
 def build_ipo_list(year: int) -> list[IPO]:
-    ipos = fetch_investorgain(year)
+    # Primary: CG report 82 — ~120 IPOs including SME ones InvestorGain misses
+    ipos = fetch_chittorgarh_ipos(year)
 
-    cg_mainboard = fetch_chittorgarh_subscription(year, "mainboard")
-    cg_sme = fetch_chittorgarh_subscription(year, "sme")
-    cg_combined = {**cg_mainboard, **cg_sme}
+    # GMP + lot size supplement from InvestorGain (~30 recent IPOs)
+    ig_lookup = fetch_investorgain_lookup(year)
 
-    groww = fetch_groww()
+    # Subscription breakdown (QIB / NII / Retail)
+    cg_sub = {
+        **fetch_chittorgarh_subscription(year, "mainboard"),
+        **fetch_chittorgarh_subscription(year, "sme"),
+    }
+
+    def _f(v: object) -> Optional[float]:
+        try:
+            return float(v) if v is not None else None
+        except (ValueError, TypeError):
+            return None
 
     for ipo in ipos:
         key = normalize_name(ipo.name)
 
-        cg = cg_combined.get(key)
-        if cg:
-            def _f(v: object) -> Optional[float]:
-                try:
-                    return float(v) if v is not None else None
-                except (ValueError, TypeError):
-                    return None
+        ig = ig_lookup.get(key)
+        if ig:
+            ipo.gmp = ig.get("gmp")
+            ipo.gmp_pct = ig.get("gmp_pct")
+            ipo.gmp_low = ig.get("gmp_low")
+            ipo.gmp_high = ig.get("gmp_high")
+            if ig.get("lot_size"):
+                ipo.lot_size = ig["lot_size"]
+            if ipo.overall_sub is None:
+                ipo.overall_sub = ig.get("overall_sub")
+            ipo.rating = ig.get("rating")
+            ipo.anchor = ig.get("anchor", False)
+            ipo.pe = ig.get("pe")
+            if ipo.boa_date is None:
+                ipo.boa_date = ig.get("boa_date")
+            ipo.sources.add("investorgain")
 
-            ipo.qib_sub = _f(cg["qib_sub"])
-            ipo.nii_sub = _f(cg["nii_sub"])
-            ipo.retail_sub = _f(cg["retail_sub"])
-            ipo.emp_sub = _f(cg["emp_sub"])
-            ipo.applications = cg["applications"]
-            ipo.sources.add("chittorgarh")
-
-        gw = groww.get(key)
-        if gw:
-            if gw.get("price_low"):
-                ipo.price_low = gw["price_low"]
-            if gw.get("price_high"):
-                ipo.price_high = gw["price_high"]
-            if gw.get("lot_size"):
-                ipo.lot_size = gw["lot_size"]
-            if ipo.overall_sub is None and gw.get("overall_sub") is not None:
-                ipo.overall_sub = gw["overall_sub"]
-            ipo.sources.add("groww")
+        sub = cg_sub.get(key)
+        if sub:
+            ipo.qib_sub = _f(sub["qib_sub"])
+            ipo.nii_sub = _f(sub["nii_sub"])
+            ipo.retail_sub = _f(sub["retail_sub"])
+            ipo.emp_sub = _f(sub["emp_sub"])
+            ipo.applications = sub["applications"]
+            if ipo.overall_sub is None:
+                ipo.overall_sub = _f(sub["total_sub"])
 
     return ipos
 
