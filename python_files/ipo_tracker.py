@@ -773,7 +773,7 @@ function renderSection(ipos,category){
         +'<td>'+strCell(ipo)+'</td>'
         +'<td>'+gmpCell(ipo)+'</td>'
         +'<td>'+trendCell(ipo)+'</td>'
-        +'<td>'+(ipo.rating?'\\ud83d\\udd25'.repeat(ipo.rating):'<span class="dim">-</span>')+'</td>'
+        +'<td>'+(ipo.rating!==null?'<span style="color:var(--amber)">'+ipo.rating+'</span><span style="color:var(--text-3)">/5</span>':'<span class="dim">-</span>')+'</td>'
         +'<td>'+(ipo.pe!==null?ipo.pe.toFixed(1)+'x':'<span class="dim">-</span>')+'</td>'
         +'<td>'+sigCell(ipo)+'</td>'
         +'<td><div class="src-badges">'+srcs+'</div></td>'
