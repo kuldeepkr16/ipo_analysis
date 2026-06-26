@@ -628,7 +628,25 @@ tr:hover td{background:rgba(29,78,216,.04)}
 .disclaimer{margin:0 24px 28px;padding:11px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.65}
 .src-badges{display:flex;gap:3px}
 .src{font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface-2);color:var(--text-3);font-family:var(--sans);text-transform:uppercase;letter-spacing:.04em}
-@media(max-width:768px){.hdr{padding:11px 16px}.controls{padding:10px 16px}.main{padding:16px;gap:20px}.hdr-sub{display:none}}
+.cards{display:none}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card-hdr{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}
+.card-name{font-size:14px;font-weight:600;color:var(--text);line-height:1.3;flex:1}
+.card-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 16px}
+.metric{display:flex;flex-direction:column;gap:3px}
+.metric-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--text-3)}
+.metric-val{font-family:var(--mono);font-size:13px;color:var(--text-2);font-variant-numeric:tabular-nums}
+.card-footer{display:flex;align-items:center;justify-content:space-between;padding-top:10px;border-top:1px solid var(--border)}
+.card-day{font-size:11px;color:var(--text-3);font-family:var(--mono)}
+@media(max-width:768px){
+  .hdr{padding:11px 16px}
+  .controls{padding:10px 16px;gap:10px}
+  .main{padding:12px;gap:20px}
+  .hdr-sub{display:none}
+  .tbl-wrap{display:none}
+  .cards{display:flex;flex-direction:column;gap:10px}
+  .disclaimer{margin:0 12px 20px;font-size:11px}
+}
 </style>
 </head>
 <body>
@@ -748,6 +766,26 @@ function sortIpos(ipos){
   return a;
 }
 
+function renderCards(ipos,category){
+  var list=sortIpos(applyFilters(ipos.filter(function(i){return i.category===category;})));
+  if(list.length===0)return'<div style="text-align:center;padding:24px;color:var(--text-3);font-style:italic;font-size:13px">No '+category+' IPOs match current filters.</div>';
+  return list.map(function(ipo){
+    var mi=minInv(ipo);
+    return'<div class="card">'
+      +'<div class="card-hdr"><span class="card-name">'+ipo.name+'</span>'+sPill(ipo.status)+'</div>'
+      +'<div class="card-grid">'
+      +'<div class="metric"><span class="metric-lbl">GMP</span><span class="metric-val">'+gmpCell(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Subscription</span><span class="metric-val">'+fmtSub(ipo.overallSub)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Min Invest</span><span class="metric-val">'+(mi!==null?fmtMoney(mi):'-')+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Closes</span><span class="metric-val">'+fmtDate(ipo.closeDate)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Price Band</span><span class="metric-val">'+priceBand(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Rating</span><span class="metric-val">'+(ipo.rating!==null?'<span style="color:var(--amber)">'+ipo.rating+'</span><span style="color:var(--text-3)">/5</span>':'<span class="dim">-</span>')+'</span></div>'
+      +'</div>'
+      +'<div class="card-footer"><span class="card-day">'+dayLabel(ipo)+'</span>'+sigCell(ipo)+'</div>'
+      +'</div>';
+  }).join('');
+}
+
 function renderSection(ipos,category){
   var list=sortIpos(applyFilters(ipos.filter(function(i){return i.category===category;})));
   var color=category==='Mainboard'?'var(--accent)':'var(--violet)';
@@ -785,6 +823,7 @@ function renderSection(ipos,category){
     +'<span class="sec-title">'+category.toUpperCase()+'</span>'
     +'<span class="sec-count">'+list.length+'</span>'
     +'</div>'
+    +'<div class="cards">'+renderCards(ipos,category)+'</div>'
     +'<div class="tbl-wrap"><table>'
     +'<thead><tr>'
     +'<th>Company</th><th>Status</th><th>Day</th><th>Open \\u2192 Close</th>'
