@@ -122,10 +122,42 @@ class IPO:
         return "Mixed"
 
     @property
+    def expected_profit(self) -> Optional[float]:
+        if self.gmp is None or self.lot_size is None:
+            return None
+        return round(self.gmp * self.lot_size, 0)
+
+    @property
+    def roi_pct(self) -> Optional[float]:
+        if self.expected_profit is None or self.min_investment is None or self.min_investment == 0:
+            return None
+        return round(self.expected_profit / self.min_investment * 100, 1)
+
+    @property
+    def allotment_odds(self) -> Optional[float]:
+        """Retail allotment probability: 1/retail_sub × 100, capped at 100%."""
+        if self.retail_sub is None or self.retail_sub <= 0:
+            return None
+        return round(min(1 / self.retail_sub * 100, 100), 1)
+
+    @property
+    def days_to_close(self) -> Optional[int]:
+        if self.close_date is None:
+            return None
+        delta = (self.close_date - date.today()).days
+        return delta if delta >= 0 else None
+
+    @property
+    def days_to_listing(self) -> Optional[int]:
+        if self.listing_date is None:
+            return None
+        delta = (self.listing_date - date.today()).days
+        return delta if delta >= 0 else None
+
+    @property
     def quick_signal(self) -> str:
-        """Heuristic only, from live GMP% + subscription strength. This is NOT
-        a fundamentals-based Apply/Skip call (no revenue/valuation/peer data
-        is available from these APIs) - just a directional read on demand."""
+        """Heuristic from GMP%, subscription, ROI, and allotment odds.
+        NOT a fundamentals-based call — no revenue/valuation/peer data."""
         if self.overall_sub is None:
             return "-"
         score = {"Weak": 0, "Average": 1, "Strong": 2, "Exceptional": 3}.get(self.subscription_strength, 0)
@@ -136,7 +168,17 @@ class IPO:
                 score += 2
             elif self.gmp_pct >= 5:
                 score += 1
-        if score >= 3:
+        if self.roi_pct is not None:
+            if self.roi_pct >= 15:
+                score += 1
+            elif self.roi_pct < 0:
+                score -= 1
+        if self.allotment_odds is not None:
+            if self.allotment_odds > 20:
+                score += 1
+            elif self.allotment_odds < 2:
+                score -= 1
+        if score >= 4:
             return "Promising"
         if score <= 0:
             return "Caution"
@@ -566,8 +608,13 @@ def ipo_to_dict(ipo: IPO) -> dict:
         "niiSub":      ipo.nii_sub,
         "retailSub":   ipo.retail_sub,
         "empSub":      ipo.emp_sub,
-        "applications": ipo.applications,
-        "sources":     sorted(ipo.sources),
+        "applications":  ipo.applications,
+        "sources":       sorted(ipo.sources),
+        "expectedProfit": ipo.expected_profit,
+        "roiPct":        ipo.roi_pct,
+        "allotmentOdds": ipo.allotment_odds,
+        "daysToClose":   ipo.days_to_close,
+        "daysToListing": ipo.days_to_listing,
     }
 
 
@@ -623,7 +670,9 @@ tr:hover td{background:rgba(29,78,216,.04)}
 .pos{color:var(--green)}.neg{color:var(--red)}.dim{color:var(--text-3)}.amb{color:var(--amber)}
 .sig{font-family:var(--sans);font-size:11px;font-weight:700}
 .sig-promise{color:var(--green)}.sig-neutral{color:var(--amber)}.sig-caution{color:var(--red)}
-.str-exc{color:var(--green);font-weight:700}.str-str{color:#86EFAC}.str-avg{color:var(--amber)}.str-wk{color:var(--red)}
+.str-exc{color:var(--green);font-weight:700}.str-str{color:#15803D}.str-avg{color:var(--amber)}.str-wk{color:var(--red)}
+.tag{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-family:var(--sans);font-weight:600}
+.tag-pos{background:rgba(21,128,61,.1);color:var(--green)}.tag-neg{background:rgba(185,28,28,.1);color:var(--red)}.tag-dim{background:rgba(148,163,184,.15);color:var(--text-3)}
 .empty-row td{text-align:center;padding:28px;color:var(--text-3);font-family:var(--sans);font-style:italic;font-size:12px}
 .disclaimer{margin:0 24px 28px;padding:11px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.65}
 .src-badges{display:flex;gap:3px}
@@ -736,23 +785,71 @@ function quickSig(ipo){
   return sc>=3?'Promising':sc<=0?'Caution':'Neutral';
 }
 
-var fmtMoney=function(v){return v!==null?'\\u20b9'+v.toLocaleString('en-IN'):'-';};
-var fmtSub=function(v){return v!==null?v.toFixed(2)+'x':'-';};
+var fmtMoney=function(v){return v!==null?'\\u20b9'+Math.round(v).toLocaleString('en-IN'):'-';};
+var fmtSub=function(v){return v!==null?parseFloat(v).toFixed(1)+'x':'-';};
+function fmtNum(v,dec){return v!==null&&v!==undefined?parseFloat(v).toFixed(dec||0):'-';}
 
 function sPill(s){var c={Open:'p-open',Upcoming:'p-upcoming',Closed:'p-closed'}[s]||'p-closed';return'<span class="pill '+c+'">'+s+'</span>';}
+
 function gmpCell(ipo){
   if(ipo.gmp===null)return'<span class="dim">-</span>';
   var cls=ipo.gmp>0?'pos':ipo.gmp<0?'neg':'';
-  var pct=ipo.gmpPct!==null?' <span style="opacity:.6">('+ipo.gmpPct.toFixed(1)+'%)</span>':'';
-  return'<span class="'+cls+'">₹'+ipo.gmp.toFixed(0)+pct+'</span>';
+  var pct=ipo.gmpPct!==null?' <span style="color:var(--text-3);font-size:11px">('+parseFloat(ipo.gmpPct).toFixed(1)+'%)</span>':'';
+  return'<span class="'+cls+'">\\u20b9'+parseFloat(ipo.gmp).toFixed(0)+pct+'</span>';
 }
-function strCell(ipo){var s=subStr(ipo);var c={Exceptional:'str-exc',Strong:'str-str',Average:'str-avg',Weak:'str-wk'}[s]||'dim';return'<span class="'+c+'">'+s+'</span>';}
-function sigCell(ipo){var s=quickSig(ipo);if(s==='-')return'<span class="dim">-</span>';var c={Promising:'sig-promise',Neutral:'sig-neutral',Caution:'sig-caution'}[s];return'<span class="sig '+c+'">'+s+'</span>';}
-function trendCell(ipo){var t=gmpTrend(ipo);if(t==='-')return'<span class="dim">-</span>';var arr={Rising:'\\u2191',Falling:'\\u2193',Flat:'\\u2192',Mixed:'\\u2248'}[t]||'';var c={Rising:'pos',Falling:'neg',Flat:'dim',Mixed:'amb'}[t]||'';return'<span class="'+c+'">'+arr+' '+t+'</span>';}
+
+function subCell(ipo){
+  if(ipo.overallSub===null)return'<span class="dim">-</span>';
+  var s=subStr(ipo);var c={Exceptional:'str-exc',Strong:'str-str',Average:'str-avg',Weak:'str-wk'}[s]||'';
+  return'<span class="'+c+'">'+parseFloat(ipo.overallSub).toFixed(1)+'x</span>';
+}
+
+function profitCell(ipo){
+  if(ipo.expectedProfit===null||ipo.expectedProfit===undefined)return'<span class="dim">-</span>';
+  var v=parseFloat(ipo.expectedProfit);
+  return'<span class="'+(v>0?'tag tag-pos':v<0?'tag tag-neg':'')+'">'+(v>0?'+':'')+fmtMoney(v)+'</span>';
+}
+
+function roiCell(ipo){
+  if(ipo.roiPct===null||ipo.roiPct===undefined)return'<span class="dim">-</span>';
+  var v=parseFloat(ipo.roiPct);
+  return'<span class="'+(v>0?'pos':v<0?'neg':'')+'" style="font-weight:600">'+v.toFixed(1)+'%</span>';
+}
+
+function oddsCell(ipo){
+  if(ipo.allotmentOdds===null||ipo.allotmentOdds===undefined)return'<span class="dim">-</span>';
+  var v=parseFloat(ipo.allotmentOdds);
+  return'<span class="'+(v>15?'pos':v<3?'neg':'amb')+'">'+v.toFixed(1)+'%</span>';
+}
+
+function sigCell(ipo){
+  var s=quickSig(ipo);if(s==='-')return'<span class="dim">-</span>';
+  var c={Promising:'sig-promise',Neutral:'sig-neutral',Caution:'sig-caution'}[s];
+  return'<span class="sig '+c+'">'+s+'</span>';
+}
+
+function trendCell(ipo){
+  var t=gmpTrend(ipo);if(t==='-')return'<span class="dim">-</span>';
+  var arr={Rising:'\\u2191',Falling:'\\u2193',Flat:'\\u2192',Mixed:'\\u2248'}[t]||'';
+  var c={Rising:'pos',Falling:'neg',Flat:'dim',Mixed:'amb'}[t]||'';
+  return'<span class="'+c+'">'+arr+' '+t+'</span>';
+}
+
 function priceBand(ipo){
   if(!ipo.priceLow&&!ipo.priceHigh)return'-';
-  if(ipo.priceLow&&ipo.priceHigh&&ipo.priceLow!==ipo.priceHigh)return ipo.priceLow.toFixed(0)+'\\u2013'+ipo.priceHigh.toFixed(0);
-  return(ipo.priceHigh||ipo.priceLow).toFixed(0);
+  if(ipo.priceLow&&ipo.priceHigh&&ipo.priceLow!==ipo.priceHigh)return'\\u20b9'+parseFloat(ipo.priceLow).toFixed(0)+'\\u2013'+parseFloat(ipo.priceHigh).toFixed(0);
+  return'\\u20b9'+parseFloat(ipo.priceHigh||ipo.priceLow).toFixed(0);
+}
+
+function ratingCell(ipo){
+  return ipo.rating!==null?'<span style="color:var(--amber);font-weight:600">'+ipo.rating+'</span><span style="color:var(--text-3)">/5</span>':'<span class="dim">-</span>';
+}
+
+function closingCell(ipo){
+  var d=fmtDate(ipo.closeDate);
+  if(ipo.daysToClose===0)return d+' <span class="tag tag-neg">Today</span>';
+  if(ipo.daysToClose===1)return d+' <span class="tag tag-neg">Tomorrow</span>';
+  return d;
 }
 
 function applyFilters(ipos){return statusFilter==='all'?ipos:ipos.filter(function(i){return i.status.toLowerCase()===statusFilter;});}
@@ -774,14 +871,14 @@ function renderCards(ipos,category){
     return'<div class="card">'
       +'<div class="card-hdr"><span class="card-name">'+ipo.name+'</span>'+sPill(ipo.status)+'</div>'
       +'<div class="card-grid">'
+      +'<div class="metric"><span class="metric-lbl">Expected Profit</span><span class="metric-val">'+profitCell(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">ROI</span><span class="metric-val">'+roiCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">GMP</span><span class="metric-val">'+gmpCell(ipo)+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">Subscription</span><span class="metric-val">'+fmtSub(ipo.overallSub)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Allotment Odds</span><span class="metric-val">'+oddsCell(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Subscription</span><span class="metric-val">'+subCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Min Invest</span><span class="metric-val">'+(mi!==null?fmtMoney(mi):'-')+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">Closes</span><span class="metric-val">'+fmtDate(ipo.closeDate)+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">Price Band</span><span class="metric-val">'+priceBand(ipo)+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">Rating</span><span class="metric-val">'+(ipo.rating!==null?'<span style="color:var(--amber)">'+ipo.rating+'</span><span style="color:var(--text-3)">/5</span>':'<span class="dim">-</span>')+'</span></div>'
       +'</div>'
-      +'<div class="card-footer"><span class="card-day">'+dayLabel(ipo)+'</span>'+sigCell(ipo)+'</div>'
+      +'<div class="card-footer"><span class="card-day">'+dayLabel(ipo)+' \\u00b7 Closes '+closingCell(ipo)+'</span>'+sigCell(ipo)+'</div>'
       +'</div>';
   }).join('');
 }
@@ -789,32 +886,28 @@ function renderCards(ipos,category){
 function renderSection(ipos,category){
   var list=sortIpos(applyFilters(ipos.filter(function(i){return i.category===category;})));
   var color=category==='Mainboard'?'var(--accent)':'var(--violet)';
+  var cols=16;
   var rows=list.length===0
-    ?'<tr class="empty-row"><td colspan="20">No '+category+' IPOs match current filters.</td></tr>'
+    ?'<tr class="empty-row"><td colspan="'+cols+'">No '+category+' IPOs match current filters.</td></tr>'
     :list.map(function(ipo){
       var mi=minInv(ipo);
-      var srcs=[...ipo.sources].map(function(s){return'<span class="src">'+s+'</span>';}).join('');
       return'<tr>'
         +'<td class="td-name" title="'+ipo.name+'">'+ipo.name+'</td>'
         +'<td>'+sPill(ipo.status)+'</td>'
-        +'<td>'+dayLabel(ipo)+'</td>'
-        +'<td>'+fmtDate(ipo.openDate)+' \\u2192 '+fmtDate(ipo.closeDate)+'</td>'
+        +'<td style="color:var(--text-3)">'+dayLabel(ipo)+'</td>'
+        +'<td>'+closingCell(ipo)+'</td>'
         +'<td>'+fmtDate(ipo.listingDate)+'</td>'
         +'<td>'+priceBand(ipo)+'</td>'
-        +'<td>'+(ipo.lotSize!=null?ipo.lotSize:'-')+'</td>'
         +'<td>'+(mi!==null?fmtMoney(mi):'-')+'</td>'
-        +'<td>'+(ipo.issueSizeCr!==null?'\\u20b9'+ipo.issueSizeCr.toFixed(1)+'Cr':'-')+'</td>'
-        +'<td>'+fmtSub(ipo.overallSub)+'</td>'
+        +'<td>'+subCell(ipo)+'</td>'
         +'<td>'+fmtSub(ipo.qibSub)+'</td>'
-        +'<td>'+fmtSub(ipo.niiSub)+'</td>'
         +'<td>'+fmtSub(ipo.retailSub)+'</td>'
-        +'<td>'+strCell(ipo)+'</td>'
+        +'<td>'+oddsCell(ipo)+'</td>'
         +'<td>'+gmpCell(ipo)+'</td>'
         +'<td>'+trendCell(ipo)+'</td>'
-        +'<td>'+(ipo.rating!==null?'<span style="color:var(--amber)">'+ipo.rating+'</span><span style="color:var(--text-3)">/5</span>':'<span class="dim">-</span>')+'</td>'
-        +'<td>'+(ipo.pe!==null?ipo.pe.toFixed(1)+'x':'<span class="dim">-</span>')+'</td>'
+        +'<td>'+profitCell(ipo)+'</td>'
+        +'<td>'+roiCell(ipo)+'</td>'
         +'<td>'+sigCell(ipo)+'</td>'
-        +'<td><div class="src-badges">'+srcs+'</div></td>'
         +'</tr>';
     }).join('');
   return'<div>'
@@ -826,11 +919,11 @@ function renderSection(ipos,category){
     +'<div class="cards">'+renderCards(ipos,category)+'</div>'
     +'<div class="tbl-wrap"><table>'
     +'<thead><tr>'
-    +'<th>Company</th><th>Status</th><th>Day</th><th>Open \\u2192 Close</th>'
-    +'<th>Listing</th><th>Price Band</th><th>Lot</th><th>Min Invest</th>'
-    +'<th>Issue Size</th><th>Overall Sub</th><th>QIB</th><th>NII</th>'
-    +'<th>Retail</th><th>Sub Strength</th><th>GMP</th><th>GMP Trend</th>'
-    +'<th>Rating</th><th>P/E</th><th>Quick Signal \\u26a0</th><th>Sources</th>'
+    +'<th>Company</th><th>Status</th><th>Day</th><th>Closes</th>'
+    +'<th>Listing</th><th>Price Band</th><th>Min Invest</th>'
+    +'<th>Sub</th><th>QIB</th><th>Retail</th>'
+    +'<th>Allotment %</th><th>GMP</th><th>Trend</th>'
+    +'<th>Exp. Profit</th><th>ROI %</th><th>Signal \\u26a0</th>'
     +'</tr></thead>'
     +'<tbody>'+rows+'</tbody></table></div></div>';
 }
