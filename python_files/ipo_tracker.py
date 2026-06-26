@@ -75,6 +75,9 @@ class IPO:
     retail_sub: Optional[float] = None
     emp_sub: Optional[float] = None
     applications: Optional[str] = None
+    listing_open_price: Optional[float] = None
+    listing_close_price: Optional[float] = None
+    listing_gain_pct: Optional[float] = None
     sources: set = field(default_factory=set)
 
     @property
@@ -418,7 +421,59 @@ def fetch_chittorgarh_subscription(year: int, segment: str) -> dict[str, dict]:
 
 
 # --------------------------------------------------------------------------- #
-# Source 3: Groww IPO page (__NEXT_DATA__ embedded JSON)
+# Source 4: Chittorgarh report 98 — listing day performance
+# --------------------------------------------------------------------------- #
+
+def fetch_chittorgarh_listing(year: int) -> dict[str, dict]:
+    """Returns listing open/close price and gain% keyed by normalize_name.
+    Uses CG report 98 which covers ~117 IPOs including historical ones."""
+    fy = f"{year}-{str(year + 1)[-2:]}"
+    url = (
+        f"https://webnodejs.chittorgarh.com/cloud/report/data-read/"
+        f"98/1/6/{year}/{fy}/0/all/0"
+    )
+    try:
+        resp = requests.get(url, headers=CG_HEADERS, params={"search": ""}, timeout=TIMEOUT)
+        resp.raise_for_status()
+        rows = resp.json().get("reportTableData", [])
+    except (requests.RequestException, ValueError):
+        return {}
+
+    result = {}
+    for row in rows:
+        name = row.get("Company", "").strip()
+        name = re.sub(r"\s+(Ltd\.?|Limited)\.?\s*$", "", name).strip()
+        key = normalize_name(name)
+
+        def _fp(v: object) -> Optional[float]:
+            try:
+                return float(v) if v and str(v).strip() else None
+            except (ValueError, TypeError):
+                return None
+
+        open_p = _fp(row.get("Open Price on Listing (Rs.)"))
+        close_p = _fp(row.get("Close Price on Listing (Rs.)"))
+
+        gain_raw = strip_html(row.get("% Gain / Loss (Issue price v/s Close price on Listing)", "") or "")
+        gain_pct = None
+        if gain_raw:
+            try:
+                v = float(gain_raw)
+                gain_pct = v if v != 0 or close_p is not None else None
+            except (ValueError, TypeError):
+                pass
+
+        if open_p is not None or gain_pct is not None:
+            result[key] = {
+                "listing_open_price": open_p,
+                "listing_close_price": close_p,
+                "listing_gain_pct": gain_pct,
+            }
+    return result
+
+
+# --------------------------------------------------------------------------- #
+# Source 5: Groww IPO page (__NEXT_DATA__ embedded JSON) — kept for reference
 # --------------------------------------------------------------------------- #
 
 def fetch_groww() -> dict[str, dict]:
@@ -478,11 +533,14 @@ def build_ipo_list(year: int) -> list[IPO]:
     # GMP + lot size supplement from InvestorGain (~30 recent IPOs)
     ig_lookup = fetch_investorgain_lookup(year)
 
-    # Subscription breakdown (QIB / NII / Retail)
+    # Subscription breakdown (QIB / NII / Retail / Total)
     cg_sub = {
         **fetch_chittorgarh_subscription(year, "mainboard"),
         **fetch_chittorgarh_subscription(year, "sme"),
     }
+
+    # Listing day performance (open price, close price, gain%)
+    cg_listing = fetch_chittorgarh_listing(year)
 
     def _f(v: object) -> Optional[float]:
         try:
@@ -519,6 +577,12 @@ def build_ipo_list(year: int) -> list[IPO]:
             ipo.applications = sub["applications"]
             if ipo.overall_sub is None:
                 ipo.overall_sub = _f(sub["total_sub"])
+
+        lst = cg_listing.get(key)
+        if lst:
+            ipo.listing_open_price = lst.get("listing_open_price")
+            ipo.listing_close_price = lst.get("listing_close_price")
+            ipo.listing_gain_pct = lst.get("listing_gain_pct")
 
     return ipos
 
@@ -692,6 +756,9 @@ def ipo_to_dict(ipo: IPO) -> dict:
         "allotmentOdds": ipo.allotment_odds,
         "daysToClose":   ipo.days_to_close,
         "daysToListing": ipo.days_to_listing,
+        "listingOpenPrice":  ipo.listing_open_price,
+        "listingClosePrice": ipo.listing_close_price,
+        "listingGainPct":    ipo.listing_gain_pct,
     }
 
 
@@ -809,11 +876,16 @@ tr:hover td{background:rgba(29,78,216,.04)}
       <option value="name">Name</option>
     </select>
   </div>
-  <span id="ctrl-stats" style="margin-left:auto"></span>
+  <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+    <svg style="width:14px;height:14px;color:var(--text-3);flex-shrink:0" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clip-rule="evenodd"/></svg>
+    <input type="text" id="search-input" placeholder="Search IPO name..." oninput="setSearch(this.value)"
+      style="border:1px solid var(--border-2);border-radius:6px;padding:5px 10px;font-size:13px;color:var(--text);background:var(--surface);outline:none;width:180px">
+  </div>
+  <span id="ctrl-stats" style="margin-left:8px;white-space:nowrap"></span>
 </div>
 <div id="content"></div>
 <script>
-var allIpos=[],statusFilter='open',sortBy='gmp';
+var allIpos=[],statusFilter='open',sortBy='gmp',searchQuery='';
 var snap=window.IPO_SNAPSHOT;
 
 function parseD(s){if(!s)return null;var d=new Date(s+'T00:00:00');return isNaN(d.getTime())?null:d;}
@@ -869,7 +941,17 @@ function fmtNum(v,dec){return v!==null&&v!==undefined?parseFloat(v).toFixed(dec|
 function sPill(s){var c={Open:'p-open',Upcoming:'p-upcoming',Closed:'p-closed'}[s]||'p-closed';return'<span class="pill '+c+'">'+s+'</span>';}
 
 function gmpCell(ipo){
-  if(ipo.gmp===null)return'<span class="dim">-</span>';
+  // For closed IPOs with no GMP: show actual listing gain% instead
+  if(ipo.gmp===null){
+    if(ipo.status==='Closed'&&ipo.listingGainPct!==null&&ipo.listingGainPct!==undefined){
+      var g=parseFloat(ipo.listingGainPct);
+      var gc=g>0?'pos':g<0?'neg':'';
+      var prefix=g>0?'+':'';
+      return'<span class="'+gc+'" title="Actual listing day gain">'
+        +prefix+g.toFixed(1)+'% <span style="font-size:10px;color:var(--text-3)">(listed)</span></span>';
+    }
+    return'<span class="dim">-</span>';
+  }
   var cls=ipo.gmp>0?'pos':ipo.gmp<0?'neg':'';
   var pct=ipo.gmpPct!==null?' <span style="color:var(--text-3);font-size:11px">('+parseFloat(ipo.gmpPct).toFixed(1)+'%)</span>':'';
   return'<span class="'+cls+'">\\u20b9'+parseFloat(ipo.gmp).toFixed(0)+pct+'</span>';
@@ -881,13 +963,48 @@ function subCell(ipo){
   return'<span class="'+c+'">'+parseFloat(ipo.overallSub).toFixed(1)+'x</span>';
 }
 
+function listingProfit(ipo){
+  // Actual profit on listing: listing_gain_pct% of (issue price × lot size)
+  if(ipo.listingGainPct===null||ipo.listingGainPct===undefined)return null;
+  var mi=minInv(ipo);
+  if(mi===null){
+    // No lot size — compute approximate if we have listing open price
+    if(ipo.listingOpenPrice!==null&&ipo.priceHigh!==null)
+      return(ipo.listingGainPct/100)*ipo.priceHigh; // per share, not per lot
+    return null;
+  }
+  return(ipo.listingGainPct/100)*mi;
+}
+
 function profitCell(ipo){
+  // Closed IPOs: show actual listing profit
+  if(ipo.status==='Closed'){
+    var lp=listingProfit(ipo);
+    if(lp===null){
+      // Fall back to showing just the gain% if no lot size
+      if(ipo.listingGainPct!==null&&ipo.listingGainPct!==undefined){
+        var g=parseFloat(ipo.listingGainPct);
+        return'<span class="'+(g>0?'pos':g<0?'neg':'')+'" title="Listing gain % — lot size unavailable">'+(g>0?'+':'')+g.toFixed(1)+'%</span>';
+      }
+      return'<span class="dim">-</span>';
+    }
+    var cls=lp>0?'tag tag-pos':lp<0?'tag tag-neg':'';
+    return'<span class="'+cls+'" title="Actual listing day profit">'+(lp>0?'+':'')+fmtMoney(Math.round(lp))+'</span>';
+  }
   if(ipo.expectedProfit===null||ipo.expectedProfit===undefined)return'<span class="dim">-</span>';
   var v=parseFloat(ipo.expectedProfit);
   return'<span class="'+(v>0?'tag tag-pos':v<0?'tag tag-neg':'')+'">'+(v>0?'+':'')+fmtMoney(v)+'</span>';
 }
 
 function roiCell(ipo){
+  // Closed IPOs: actual ROI = listing_gain_pct
+  if(ipo.status==='Closed'){
+    if(ipo.listingGainPct!==null&&ipo.listingGainPct!==undefined){
+      var g=parseFloat(ipo.listingGainPct);
+      return'<span class="'+(g>0?'pos':g<0?'neg':'')+'" style="font-weight:600" title="Actual listing day ROI">'+(g>0?'+':'')+g.toFixed(1)+'%</span>';
+    }
+    return'<span class="dim">-</span>';
+  }
   if(ipo.roiPct===null||ipo.roiPct===undefined)return'<span class="dim">-</span>';
   var v=parseFloat(ipo.roiPct);
   return'<span class="'+(v>0?'pos':v<0?'neg':'')+'" style="font-weight:600">'+v.toFixed(1)+'%</span>';
@@ -929,7 +1046,14 @@ function closingCell(ipo){
   return d;
 }
 
-function applyFilters(ipos){return statusFilter==='all'?ipos:ipos.filter(function(i){return i.status.toLowerCase()===statusFilter;});}
+function applyFilters(ipos){
+  var q=searchQuery.toLowerCase().trim();
+  return ipos.filter(function(i){
+    if(statusFilter!=='all'&&i.status.toLowerCase()!==statusFilter)return false;
+    if(q&&i.name.toLowerCase().indexOf(q)===-1)return false;
+    return true;
+  });
+}
 function sortIpos(ipos){
   var a=ipos.slice();
   if(sortBy==='gmp')a.sort(function(x,y){return(y.gmpPct!=null?y.gmpPct:-999)-(x.gmpPct!=null?x.gmpPct:-999);});
@@ -948,9 +1072,9 @@ function renderCards(ipos,category){
     return'<div class="card">'
       +'<div class="card-hdr"><span class="card-name">'+ipo.name+'</span>'+sPill(ipo.status)+'</div>'
       +'<div class="card-grid">'
-      +'<div class="metric"><span class="metric-lbl">Expected Profit</span><span class="metric-val">'+profitCell(ipo)+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">ROI</span><span class="metric-val">'+roiCell(ipo)+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">GMP</span><span class="metric-val">'+gmpCell(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">'+(ipo.status==='Closed'?'Listing Profit':'Exp. Profit')+'</span><span class="metric-val">'+profitCell(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">ROI %</span><span class="metric-val">'+roiCell(ipo)+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">'+(ipo.status==='Closed'?'Listing Gain':'GMP')+'</span><span class="metric-val">'+gmpCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Allotment Odds</span><span class="metric-val">'+oddsCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Subscription</span><span class="metric-val">'+subCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Min Invest</span><span class="metric-val">'+(mi!==null?fmtMoney(mi):'-')+'</span></div>'
@@ -999,8 +1123,8 @@ function renderSection(ipos,category){
     +'<th>Company</th><th>Status</th><th>Day</th><th>Closes</th>'
     +'<th>Listing</th><th>Price Band</th><th>Min Invest</th>'
     +'<th>Sub</th><th>QIB</th><th>Retail</th>'
-    +'<th>Allotment %</th><th>GMP</th><th>Trend</th>'
-    +'<th>Exp. Profit</th><th>ROI %</th><th>Signal \\u26a0</th>'
+    +'<th>Allotment %</th><th>GMP / Listing</th><th>Trend</th>'
+    +'<th>Profit</th><th>ROI %</th><th>Signal \\u26a0</th>'
     +'</tr></thead>'
     +'<tbody>'+rows+'</tbody></table></div></div>';
 }
@@ -1021,6 +1145,7 @@ function setStatus(s){
   renderContent();
 }
 function setSort(s){sortBy=s;renderContent();}
+function setSearch(v){searchQuery=v;renderContent();}
 
 (function init(){
   allIpos=loadIpos();
