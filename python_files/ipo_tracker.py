@@ -182,10 +182,10 @@ class IPO:
             elif self.allotment_odds < 2:
                 score -= 1
         if score >= 4:
-            return "Promising"
+            return "Strong Buy"
         if score <= 0:
-            return "Caution"
-        return "Neutral"
+            return "Do Not Buy"
+        return "Not Sure, You Decide"
 
 
 # --------------------------------------------------------------------------- #
@@ -1007,7 +1007,7 @@ function quickSig(ipo){
   if(ipo.overallSub===null)return'-';
   var sc={Weak:0,Average:1,Strong:2,Exceptional:3}[subStr(ipo)]||0;
   if(ipo.gmpPct!==null){if(ipo.gmpPct<0)sc-=2;else if(ipo.gmpPct>=20)sc+=2;else if(ipo.gmpPct>=5)sc+=1;}
-  return sc>=3?'Promising':sc<=0?'Caution':'Neutral';
+  return sc>=3?'Strong Buy':sc<=0?'Do Not Buy':'Not Sure, You Decide';
 }
 
 var fmtMoney=function(v){return v!==null?'\\u20b9'+Math.round(v).toLocaleString('en-IN'):'-';};
@@ -1100,7 +1100,7 @@ function oddsCell(ipo){
 
 function sigCell(ipo){
   var s=quickSig(ipo);if(s==='-')return'<span class="dim">-</span>';
-  var c={Promising:'sig-promise',Neutral:'sig-neutral',Caution:'sig-caution'}[s];
+  var c={'Strong Buy':'sig-promise','Not Sure, You Decide':'sig-neutral','Do Not Buy':'sig-caution'}[s];
   return'<span class="sig '+c+'">'+s+'</span>';
 }
 
