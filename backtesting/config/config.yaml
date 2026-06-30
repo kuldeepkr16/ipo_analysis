@@ -1,0 +1,92 @@
+universe:
+  nifty500: true
+  top_active: 100
+  top_volatile: 50
+  exclude_penny_below: 20.0        # skip stocks below ₹20
+  min_avg_volume: 50000            # minimum 50k avg daily volume
+
+data:
+  provider: yfinance               # yfinance | kite
+  years: 5
+  cache_dir: data/cache
+  cache_format: parquet            # parquet | csv
+  request_delay_sec: 0.3          # polite delay between downloads
+  max_retries: 3
+
+indicators:
+  ema_periods: [20, 50, 200]
+  rsi_period: 14
+  macd:
+    fast: 12
+    slow: 26
+    signal: 9
+  atr_period: 14
+  adx_period: 14
+  bollinger:
+    period: 20
+    std_dev: 2.0
+  volume_sma_period: 20
+  vwap_period: 20                  # rolling VWAP window (daily data)
+
+entry:
+  rsi_min: 55
+  rsi_max: 70
+  volume_multiplier: 2.0
+  breakout_period: 20
+  adx_min: 25
+  require_all_emas_aligned: true   # EMA20 > EMA50 > EMA200
+  require_macd_crossover: true
+  require_volume_surge: true
+  require_breakout: true
+
+exits:
+  strategy_a:
+    target_pct: 10.0
+    stop_loss_pct: 4.0
+    max_days: 10
+  strategy_b:
+    atr_multiplier: 2.0
+    initial_stop_atr_mult: 1.5
+    max_days: 15
+  strategy_c:
+    max_days: 20
+  strategy_d:
+    max_days: 20
+  strategy_e:
+    holding_periods: [3, 5, 7, 10]
+
+# When both SL and target are hit on same candle, assume SL hit first (conservative)
+same_bar_assumption: sl_first
+
+optimization:
+  enabled: true
+  max_workers: 4                   # parallel workers
+  rsi_ranges:
+    - [50, 60]
+    - [55, 65]
+    - [60, 70]
+  volume_multipliers: [1.5, 2.0, 2.5, 3.0]
+  breakout_periods: [10, 20, 30]
+  ema_sets:
+    - [20, 50, 200]
+    - [10, 30, 100]
+    - [9, 21, 55]
+  targets_pct: [5.0, 8.0, 10.0, 12.0, 15.0]
+  stop_losses_pct: [2.0, 3.0, 4.0, 5.0, 6.0]
+  top_n_results: 50
+
+filters:
+  min_trades_for_stats: 30         # ignore param sets with fewer trades
+  win_rate_target: 0.55
+  profit_factor_target: 1.8
+  avg_return_target: 4.0
+  max_drawdown_limit: 15.0
+  max_avg_holding_days: 10
+
+output:
+  dir: output
+  trades_csv: trades.csv
+  summary_csv: summary.csv
+  optimization_csv: optimization_results.csv
+  html_report: report.html
+  log_level: INFO
