@@ -1510,15 +1510,12 @@ function sentimentCell(ipo){
   var html='<div class="sent-wrap">';
   var fires=ipo.rating||0;
 
-  // IG rating row — filled/empty dots, no emoji
-  var dotStr='';
-  for(var i=0;i<fires;i++)dotStr+='<span style="color:var(--amber)">&#9679;</span>';
-  for(var i=fires;i<5;i++)dotStr+='<span style="opacity:.25;color:var(--text-3)">&#9679;</span>';
-  var igLabel=fires>=4?'<span class="snt-pos" style="font-size:9px">High</span>':fires>=3?'<span class="snt-dim" style="font-size:9px">Med</span>':fires>0?'<span class="snt-neg" style="font-size:9px">Low</span>':'<span class="snt-dim" style="font-size:9px">-</span>';
+  // IG rating row — numeric X/5
+  var igCol=fires>=4?'var(--green)':fires>=3?'var(--amber)':fires>0?'var(--red)':'var(--text-3)';
   html+='<div class="sent-row" title="InvestorGain editorial rating (1-5)">'
     +'<span class="sent-lbl">IG</span>'
-    +'<span style="font-size:9px;letter-spacing:1px">'+dotStr+'</span>'
-    +' '+igLabel
+    +'<span style="font-weight:600;color:'+igCol+'">'+fires+'</span>'
+    +'<span style="color:var(--text-3)">/5</span>'
     +'</div>';
 
   // Broker coverage badge
