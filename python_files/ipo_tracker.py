@@ -95,6 +95,8 @@ class IPO:
     proceeds_debt: float = 0.0             # % of proceeds going to debt repayment
     proceeds_wc: float = 0.0              # % of proceeds going to working capital
     proceeds_general: float = 0.0         # % of proceeds going to general corp purposes
+    # IPO Watch editorial review (Subscribe / Neutral / Avoid)
+    iw_review: Optional[str] = None
 
     @property
     def min_investment(self) -> Optional[float]:
@@ -327,6 +329,8 @@ class IPO:
             cap(2.5, "Proceeds: mostly GCP")
         if self.gmp_pct is not None and self.gmp_pct < 0:
             cap(3.0, "Negative GMP")
+        if self.iw_review == "Avoid":
+            cap(2.5, "IPO Watch: Avoid")
         if self.category == "SME":
             score = round(score * 0.92, 1)  # 8% discount for SME risk
             if not capped_by:
@@ -826,6 +830,33 @@ def scrape_lot_size(slug: str) -> Optional[int]:
     return None
 
 
+def scrape_ipowatch_review(slug: str) -> Optional[str]:
+    """Scrape editorial review verdict from ipowatch.in.
+    slug format: 'kratikal-tech-ipo/2844' — uses the name part before '/'
+    Returns 'Subscribe', 'Neutral', 'Avoid', or None.
+    """
+    try:
+        name_slug = slug.split("/")[0]
+        url = f"https://ipowatch.in/{name_slug}/"
+        resp = requests.get(url, headers=CG_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        m = re.search(r'<li><strong>Review:</strong>\s*([^<]+)</li>', resp.text, re.IGNORECASE)
+        if m:
+            verdict = m.group(1).strip()
+            # Normalise to canonical values
+            vl = verdict.lower()
+            if "avoid" in vl:
+                return "Avoid"
+            if "subscribe" in vl:
+                return "Subscribe"
+            if "neutral" in vl:
+                return "Neutral"
+            return verdict  # return raw if unrecognised
+    except (requests.RequestException, ValueError, AttributeError):
+        pass
+    return None
+
+
 # --------------------------------------------------------------------------- #
 # Source 6: Groww IPO page (__NEXT_DATA__ embedded JSON) — kept for reference
 # --------------------------------------------------------------------------- #
@@ -973,6 +1004,17 @@ def build_ipo_list(year: int) -> list[IPO]:
         ipo.proceeds_debt    = data.get("proceeds_debt",    0.0)
         ipo.proceeds_wc      = data.get("proceeds_wc",      0.0)
         ipo.proceeds_general = data.get("proceeds_general", 0.0)
+
+    # Scrape IPO Watch editorial review for Open/Upcoming IPOs
+    for ipo in ipos:
+        if ipo.status not in ("Open", "Upcoming"):
+            continue
+        slug = getattr(ipo, "_cg_slug", "")
+        if not slug:
+            continue
+        review = scrape_ipowatch_review(slug)
+        if review:
+            ipo.iw_review = review
 
     return ipos
 
@@ -1163,6 +1205,7 @@ def ipo_to_dict(ipo: IPO) -> dict:
         "proceedsDebt":   ipo.proceeds_debt,
         "proceedsWc":     ipo.proceeds_wc,
         "proceedsGeneral":ipo.proceeds_general,
+        "iwReview":       ipo.iw_review,
         "compositeScore": ipo.composite_score["score"],
         "compositeLabel": ipo.composite_score["label"],
         "compositeFactors": {k: {"score": v["score"], "weight": v["weight"], "contribution": v["contribution"], "note": v["note"]} for k, v in ipo.composite_score["factors"].items()},
@@ -1517,6 +1560,15 @@ function sentimentCell(ipo){
     +'<span style="font-weight:600;color:'+igCol+'">'+fires+'</span>'
     +'<span style="color:var(--text-3)">/5</span>'
     +'</div>';
+
+  // IPO Watch editorial review row
+  if(ipo.iwReview){
+    var iwCol=ipo.iwReview==='Subscribe'?'var(--green)':ipo.iwReview==='Avoid'?'var(--red)':'var(--amber)';
+    html+='<div class="sent-row" title="IPO Watch editorial review (ipowatch.in)">'
+      +'<span class="sent-lbl">IW</span>'
+      +'<span style="font-weight:600;color:'+iwCol+';font-size:9px">'+ipo.iwReview+'</span>'
+      +'</div>';
+  }
 
   // Broker coverage badge
   var bTotal=ipo.brokerApply+ipo.brokerNeutral+ipo.brokerAvoid;
