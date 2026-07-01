@@ -79,6 +79,13 @@ class IPO:
     listing_close_price: Optional[float] = None
     listing_gain_pct: Optional[float] = None
     sources: set = field(default_factory=set)
+    # Broker + member recommendation counts from CG
+    broker_apply: int = 0
+    broker_avoid: int = 0
+    broker_neutral: int = 0
+    member_apply: int = 0
+    member_avoid: int = 0
+    member_neutral: int = 0
 
     @property
     def min_investment(self) -> Optional[float]:
@@ -484,6 +491,53 @@ def fetch_chittorgarh_listing(year: int) -> dict[str, dict]:
 # Source 5: Chittorgarh individual page — lot size scraper (for closed IPOs)
 # --------------------------------------------------------------------------- #
 
+def scrape_broker_recs(slug: str) -> dict:
+    """Scrape broker + member recommendation counts from Chittorgarh recommendation page.
+    slug format: 'kratikal-tech-ipo/2096'
+    Returns dict with keys: broker_apply, broker_avoid, broker_neutral,
+                             member_apply, member_avoid, member_neutral"""
+    try:
+        parts = slug.split("/")
+        if len(parts) < 2:
+            return {}
+        name_slug, cg_id = parts[0], parts[1]
+        url = f"https://www.chittorgarh.com/ipo-recommendation/{name_slug}/{cg_id}/"
+        resp = requests.get(url, headers=CG_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        html = resp.text[:250000]
+
+        result = {}
+
+        # CG recommendation page has two tables: Brokers then Members
+        # Headers: Review By | Apply | May Apply | Neutral | Avoid | Not Rated
+        # Count row has numeric <td> values
+
+        tables = re.findall(r'(?:Broker|Member).*?</table>', html, re.DOTALL | re.IGNORECASE)
+        for table in tables[:2]:
+            header_text = table[:200].lower()
+            # Extract all numeric td values from the Count row
+            nums = re.findall(r'<td[^>]*>(\d+)</td>', table)
+            if len(nums) < 4:
+                continue
+            # nums order matches header: Apply, May Apply, Neutral, Avoid, Not Rated
+            total_apply  = int(nums[0]) + int(nums[1])  # Apply + May Apply
+            total_neutral = int(nums[2])
+            total_avoid   = int(nums[3])
+
+            if 'broker' in header_text:
+                result['broker_apply']   = total_apply
+                result['broker_neutral'] = total_neutral
+                result['broker_avoid']   = total_avoid
+            elif 'member' in header_text:
+                result['member_apply']   = total_apply
+                result['member_neutral'] = total_neutral
+                result['member_avoid']   = total_avoid
+
+        return result
+    except (requests.RequestException, ValueError, IndexError):
+        return {}
+
+
 def scrape_lot_size(slug: str) -> Optional[int]:
     """Scrape lot size from Chittorgarh individual IPO page.
     Only called for recently closed IPOs missing lot size from InvestorGain."""
@@ -809,6 +863,12 @@ def ipo_to_dict(ipo: IPO) -> dict:
         "listingOpenPrice":  ipo.listing_open_price,
         "listingClosePrice": ipo.listing_close_price,
         "listingGainPct":    ipo.listing_gain_pct,
+        "brokerApply":   ipo.broker_apply,
+        "brokerAvoid":   ipo.broker_avoid,
+        "brokerNeutral": ipo.broker_neutral,
+        "memberApply":   ipo.member_apply,
+        "memberAvoid":   ipo.member_avoid,
+        "memberNeutral": ipo.member_neutral,
     }
 
 
@@ -874,6 +934,14 @@ tr:hover td{background:rgba(29,78,216,.04)}
 .tag{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-family:var(--sans);font-weight:600}
 .tag-pos{background:rgba(21,128,61,.1);color:var(--green)}.tag-neg{background:rgba(185,28,28,.1);color:var(--red)}.tag-dim{background:rgba(148,163,184,.15);color:var(--text-3)}
 .empty-row td{text-align:center;padding:28px;color:var(--text-3);font-family:var(--sans);font-style:italic;font-size:12px}
+.sent-wrap{display:flex;flex-direction:column;gap:3px;min-width:120px}
+.sent-row{display:flex;align-items:center;gap:5px;font-size:10px;font-family:var(--sans)}
+.sent-lbl{color:var(--text-3);min-width:34px;font-size:9px;text-transform:uppercase;letter-spacing:.05em}
+.sent-bar-wrap{flex:1;height:5px;background:var(--border);border-radius:3px;overflow:hidden;min-width:50px}
+.sent-bar-fill{height:100%;border-radius:3px;transition:width .3s}
+.sent-counts{font-size:9.5px;white-space:nowrap}
+.sent-fire{color:var(--amber);letter-spacing:1px}
+.snt-pos{color:var(--green)}.snt-neg{color:var(--red)}.snt-dim{color:var(--text-3)}
 .disclaimer{margin:0 24px 28px;padding:11px 16px;background:var(--surface);border:1px solid var(--border);border-radius:6px;font-size:11px;color:var(--text-3);line-height:1.65}
 .src-badges{display:flex;gap:3px}
 .src{font-size:9px;padding:1px 5px;border-radius:3px;background:var(--surface-2);color:var(--text-3);font-family:var(--sans);text-transform:uppercase;letter-spacing:.04em}
@@ -1121,6 +1189,49 @@ function ratingCell(ipo){
   return ipo.rating!==null?'<span style="color:var(--amber);font-weight:600">'+ipo.rating+'</span><span style="color:var(--text-3)">/5</span>':'<span class="dim">-</span>';
 }
 
+function sentimentCell(ipo){
+  var html='<div class="sent-wrap">';
+  var fires=ipo.rating||0;
+
+  // IG fire rating row (always shown)
+  var fireStr='';
+  for(var i=0;i<fires;i++)fireStr+='\\uD83D\\uDD25';
+  for(var i=fires;i<5;i++)fireStr+='<span style="opacity:.18">\\uD83D\\uDD25</span>';
+  var igLabel=fires>=4?'<span class="snt-pos" style="font-size:9px">High</span>':fires>=3?'<span class="snt-dim" style="font-size:9px">Med</span>':fires>0?'<span class="snt-neg" style="font-size:9px">Low</span>':'<span class="snt-dim" style="font-size:9px">-</span>';
+  html+='<div class="sent-row" title="InvestorGain editorial rating (1-5)">'
+    +'<span class="sent-lbl">IG</span>'
+    +'<span class="sent-fire" style="font-size:10px">'+fireStr+'</span>'
+    +' '+igLabel
+    +'</div>';
+
+  // Broker coverage badge
+  var bTotal=ipo.brokerApply+ipo.brokerNeutral+ipo.brokerAvoid;
+  if(bTotal>0){
+    var bDom=ipo.brokerAvoid>ipo.brokerApply?'Avoid':ipo.brokerApply>ipo.brokerAvoid?'Apply':'Neutral';
+    var bCls=bDom==='Avoid'?'snt-neg':bDom==='Apply'?'snt-pos':'snt-dim';
+    html+='<div class="sent-row" title="Broker analyst recommendations from Chittorgarh">'
+      +'<span class="sent-lbl">Broker</span>'
+      +'<span class="'+bCls+'" style="font-size:9px">\\u2713'+ipo.brokerApply+' Apply / \\u2717'+ipo.brokerAvoid+' Avoid</span>'
+      +'</div>';
+  } else {
+    html+='<div class="sent-row" title="No broker analyst coverage available">'
+      +'<span class="sent-lbl">Broker</span>'
+      +'<span class="snt-dim" style="font-size:9px">Not covered</span>'
+      +'</div>';
+  }
+
+  // SME risk badge
+  if(ipo.category==='SME'){
+    html+='<div class="sent-row">'
+      +'<span class="sent-lbl" style="min-width:34px"></span>'
+      +'<span style="font-size:9px;background:rgba(180,83,9,.1);color:#B45309;padding:1px 5px;border-radius:3px;font-family:var(--sans);font-weight:600">SME \\u26a0 Higher risk</span>'
+      +'</div>';
+  }
+
+  html+='</div>';
+  return html;
+}
+
 function closingCell(ipo){
   var d=fmtDate(ipo.closeDate);
   if(ipo.daysToClose===0)return d+' <span class="tag tag-neg">Today</span>';
@@ -1161,6 +1272,7 @@ function renderCards(ipos,category){
       +'<div class="metric"><span class="metric-lbl">Subscription</span><span class="metric-val">'+subCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Min Invest</span><span class="metric-val">'+(mi!==null?fmtMoney(mi):'-')+'</span></div>'
       +'</div>'
+      +'<div style="padding-top:8px;border-top:1px solid var(--border)">'+sentimentCell(ipo)+'</div>'
       +'<div class="card-footer"><span class="card-day">'+dayLabel(ipo)+' \\u00b7 Closes '+closingCell(ipo)+'</span>'+sigCell(ipo)+'</div>'
       +'</div>';
   }).join('');
@@ -1169,7 +1281,7 @@ function renderCards(ipos,category){
 function renderSection(ipos,category){
   var list=sortIpos(applyFilters(ipos.filter(function(i){return i.category===category;})));
   var color=category==='Mainboard'?'var(--accent)':'var(--violet)';
-  var cols=16;
+  var cols=17;
   var rows=list.length===0
     ?'<tr class="empty-row"><td colspan="'+cols+'">No '+category+' IPOs match current filters.</td></tr>'
     :list.map(function(ipo){
@@ -1190,6 +1302,7 @@ function renderSection(ipos,category){
         +'<td>'+trendCell(ipo)+'</td>'
         +'<td>'+profitCell(ipo)+'</td>'
         +'<td>'+roiCell(ipo)+'</td>'
+        +'<td>'+sentimentCell(ipo)+'</td>'
         +'<td>'+sigCell(ipo)+'</td>'
         +'</tr>';
     }).join('');
@@ -1206,7 +1319,7 @@ function renderSection(ipos,category){
     +'<th>Listing</th><th>Price Band</th><th>Min Invest</th>'
     +'<th>Sub</th><th>QIB</th><th>Retail</th>'
     +'<th>Allotment %</th><th>GMP / Listing</th><th>Trend</th>'
-    +'<th>Profit</th><th>ROI %</th><th>Signal \\u26a0</th>'
+    +'<th>Profit</th><th>ROI %</th><th>Sentiment \\uD83D\\uDD25</th><th>Signal \\u26a0</th>'
     +'</tr></thead>'
     +'<tbody>'+rows+'</tbody></table></div></div>';
 }
@@ -1218,7 +1331,7 @@ function renderContent(){
   document.getElementById('ctrl-stats').textContent=mb+' mainboard \\u00b7 '+sme+' SME';
   document.getElementById('content').innerHTML=
     '<div class="main">'+renderSection(allIpos,'Mainboard')+renderSection(allIpos,'SME')+'</div>'
-    +'<div class="disclaimer">\\u26a0 <strong>Quick Signal</strong> is a heuristic from live GMP% + subscription only \\u2014 not a fundamentals-based Apply/Skip call. No revenue, valuation, or peer data included. Data sourced from InvestorGain and Chittorgarh. Updated automatically every 2 hours via GitHub Actions.</div>';
+    +'<div class="disclaimer">\\u26a0 <strong>Quick Signal</strong> is purely algorithmic (GMP% + subscription). It has no knowledge of business quality, promoter reputation, legal issues, or market manipulation. <strong>SME IPOs</strong> have lower regulatory scrutiny, thin liquidity, and are more prone to GMP manipulation \\u2014 always do your own research before applying. <strong>Sentiment column</strong>: \\uD83D\\uDD25 = InvestorGain editorial rating (1\\u20135); Broker = analyst Apply/Avoid coverage. Data sourced from InvestorGain and Chittorgarh. Updated every 2 hours via GitHub Actions.</div>';
 }
 
 function setStatus(s){
