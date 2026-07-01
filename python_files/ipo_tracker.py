@@ -86,6 +86,15 @@ class IPO:
     member_apply: int = 0
     member_avoid: int = 0
     member_neutral: int = 0
+    # Fundamental data scraped from CG individual IPO page
+    promoter_pre: Optional[float] = None   # promoter holding % pre-IPO
+    promoter_post: Optional[float] = None  # promoter holding % post-IPO
+    fresh_pct: Optional[float] = None      # fresh issue as % of total (0–100)
+    ofs_pct: Optional[float] = None        # OFS as % of total (0–100)
+    proceeds_capex: float = 0.0            # % of proceeds going to capex/expansion
+    proceeds_debt: float = 0.0             # % of proceeds going to debt repayment
+    proceeds_wc: float = 0.0              # % of proceeds going to working capital
+    proceeds_general: float = 0.0         # % of proceeds going to general corp purposes
 
     @property
     def min_investment(self) -> Optional[float]:
@@ -193,6 +202,156 @@ class IPO:
         if score <= 0:
             return "Do Not Buy"
         return "Not Sure, You Decide"
+
+    @property
+    def composite_score(self) -> dict:
+        """
+        Composite 1-5 rating. Returns dict with:
+          score: float (1.0–5.0, 1 decimal)
+          label: str
+          factors: dict of factor_name -> {score_0_1, weight, contribution, note}
+          capped_by: str or None
+        """
+        factors = {}
+
+        # --- Factor 1: QIB subscription (weight 20%) ---
+        if self.qib_sub is not None:
+            q = self.qib_sub
+            s = 1.0 if q >= 50 else 0.8 if q >= 20 else 0.6 if q >= 10 else 0.4 if q >= 5 else 0.2 if q >= 2 else 0.0
+            note = f"{q:.1f}x"
+        else:
+            s, note = 0.3, "No data"
+        factors["QIB Sub"] = {"score": s, "weight": 0.20, "note": note}
+
+        # --- Factor 2: Overall subscription (weight 10%) ---
+        strength_map = {"Exceptional": 1.0, "Strong": 0.75, "Average": 0.4, "Weak": 0.0}
+        ss = self.subscription_strength
+        factors["Overall Sub"] = {
+            "score": strength_map.get(ss, 0.3),
+            "weight": 0.10,
+            "note": f"{self.overall_sub:.1f}x" if self.overall_sub else "No data"
+        }
+
+        # --- Factor 3: Allotment odds (weight 5%) ---
+        if self.allotment_odds is not None:
+            a = self.allotment_odds
+            s = 1.0 if a > 20 else 0.75 if a > 10 else 0.5 if a > 5 else 0.25 if a > 2 else 0.0
+            note = f"{a:.1f}%"
+        else:
+            s, note = 0.3, "No data"
+        factors["Allotment Odds"] = {"score": s, "weight": 0.05, "note": note}
+
+        # --- Factor 4: ROI % (weight 5%) ---
+        if self.roi_pct is not None:
+            r = self.roi_pct
+            s = 1.0 if r >= 30 else 0.75 if r >= 15 else 0.5 if r >= 5 else 0.25 if r >= 0 else 0.0
+            note = f"{r:.1f}%"
+        else:
+            s, note = 0.3, "No data"
+        factors["ROI (GMP)"] = {"score": s, "weight": 0.05, "note": note}
+
+        # --- Factor 5: GMP % (weight 10%) ---
+        if self.gmp_pct is not None:
+            g = self.gmp_pct
+            s = 1.0 if g >= 30 else 0.75 if g >= 15 else 0.5 if g >= 5 else 0.25 if g >= 0 else 0.0
+            note = f"{g:.1f}%"
+        else:
+            s, note = 0.3, "No data"
+        factors["GMP %"] = {"score": s, "weight": 0.10, "note": note}
+
+        # --- Factor 6: IG fire rating (weight 10%) ---
+        if self.rating is not None:
+            ig_map = {5: 1.0, 4: 0.75, 3: 0.5, 2: 0.25, 1: 0.0}
+            s = ig_map.get(self.rating, 0.3)
+            note = f"{self.rating}/5 🔥"
+        else:
+            s, note = 0.3, "No data"
+        factors["IG Rating"] = {"score": s, "weight": 0.10, "note": note}
+
+        # --- Factor 7: Promoter post-IPO holding (weight 15%) ---
+        if self.promoter_post is not None:
+            p = self.promoter_post
+            s = 1.0 if p >= 70 else 0.8 if p >= 60 else 0.6 if p >= 50 else 0.4 if p >= 40 else 0.2 if p >= 30 else 0.0
+            note = f"{p:.1f}%"
+        else:
+            s, note = 0.4, "No data"
+        factors["Promoter Hold"] = {"score": s, "weight": 0.15, "note": note}
+
+        # --- Factor 8: OFS % (weight 15%) ---
+        if self.ofs_pct is not None:
+            o = self.ofs_pct
+            s = 1.0 if o == 0 else 0.8 if o < 20 else 0.6 if o < 40 else 0.4 if o < 60 else 0.2 if o < 80 else 0.0
+            note = f"{o:.0f}% OFS"
+        else:
+            s, note = 0.5, "No data"
+        factors["OFS %"] = {"score": s, "weight": 0.15, "note": note}
+
+        # --- Factor 9: Use of proceeds (weight 10%) ---
+        if self.fresh_pct is not None and self.fresh_pct > 0:
+            # Score the proceeds allocation (out of what IS fresh)
+            raw = (self.proceeds_capex * 0.9 + self.proceeds_debt * 0.5 +
+                   self.proceeds_wc * 0.3 + self.proceeds_general * 0.0)
+            s = min(1.0, max(0.0, raw / 100.0))
+            parts = []
+            if self.proceeds_capex > 5: parts.append(f"Capex {self.proceeds_capex:.0f}%")
+            if self.proceeds_debt > 5: parts.append(f"Debt {self.proceeds_debt:.0f}%")
+            if self.proceeds_wc > 5: parts.append(f"WC {self.proceeds_wc:.0f}%")
+            if self.proceeds_general > 5: parts.append(f"GCP {self.proceeds_general:.0f}%")
+            note = ", ".join(parts) if parts else "Not disclosed"
+        elif self.ofs_pct is not None and self.ofs_pct >= 99:
+            s, note = 0.2, "100% OFS — no fresh proceeds"
+        else:
+            s, note = 0.4, "No data"
+        factors["Use of Proceeds"] = {"score": s, "weight": 0.10, "note": note}
+
+        # --- Compute weighted raw score (0-1) ---
+        raw = sum(f["score"] * f["weight"] for f in factors.values())
+        score = round(raw * 5, 1)
+
+        # --- Hard caps ---
+        capped_by = None
+
+        def cap(max_score: float, reason: str):
+            nonlocal score, capped_by
+            if score > max_score:
+                score = max_score
+                capped_by = reason
+
+        if self.ofs_pct is not None and self.ofs_pct > 80:
+            cap(2.0, "OFS >80%")
+        if self.qib_sub is not None and self.qib_sub < 1:
+            cap(2.0, "QIB <1x")
+        if self.promoter_post is not None and self.promoter_post < 30:
+            cap(2.0, "Promoter <30%")
+        if self.proceeds_general > 80 and (self.fresh_pct or 0) > 0:
+            cap(2.5, "Proceeds: mostly GCP")
+        if self.gmp_pct is not None and self.gmp_pct < 0:
+            cap(3.0, "Negative GMP")
+        if self.category == "SME":
+            score = round(score * 0.92, 1)  # 8% discount for SME risk
+            if not capped_by:
+                capped_by = "SME discount applied"
+
+        score = max(1.0, min(5.0, score))
+
+        label = (
+            "Strong Buy" if score >= 4.5 else
+            "Buy" if score >= 3.5 else
+            "Research Needed" if score >= 2.5 else
+            "Caution" if score >= 1.5 else
+            "Avoid"
+        )
+
+        # Add contribution to each factor for display
+        for f in factors.values():
+            f["contribution"] = round(f["score"] * f["weight"] * 5, 2)
+
+        return {
+            "score": score,
+            "label": label,
+            "factors": factors,
+            "capped_by": capped_by,
+        }
 
 
 # --------------------------------------------------------------------------- #
@@ -538,6 +697,116 @@ def scrape_broker_recs(slug: str) -> dict:
         return {}
 
 
+def scrape_ipo_fundamentals(slug: str) -> dict:
+    """
+    Scrape promoter holding, OFS/fresh split, and use of proceeds from CG individual IPO page.
+    slug format: 'kratikal-tech-ipo/2844'
+    """
+    try:
+        parts = slug.split("/")
+        if len(parts) < 2:
+            return {}
+        url = f"https://www.chittorgarh.com/ipo/{parts[0]}/{parts[1]}/"
+        resp = requests.get(url, headers=CG_HEADERS, timeout=TIMEOUT)
+        resp.raise_for_status()
+        html = resp.text
+
+        result = {}
+
+        # --- Extract JSON fields from RSC payload ---
+        def json_val(key: str) -> Optional[str]:
+            m = re.search(
+                r'\\\"' + re.escape(key) + r'\\\":(\\\"([^\\\"]{0,200})\\\"|(-?[\d.]+)|null)',
+                html
+            )
+            if not m:
+                return None
+            if m.group(2) is not None:
+                return m.group(2).strip()
+            if m.group(3) is not None:
+                return m.group(3).strip()
+            return None
+
+        # Promoter holding
+        pre_str  = json_val("promoter_shareholding_pre_issue")
+        post_str = json_val("promoter_shareholding_post_issue")
+        if pre_str:
+            m = re.search(r"([\d.]+)", pre_str)
+            if m: result["promoter_pre"] = float(m.group(1))
+        if post_str:
+            m = re.search(r"([\d.]+)", post_str)
+            if m: result["promoter_post"] = float(m.group(1))
+
+        # Fresh / OFS split
+        fresh_str = json_val("issue_size_fresh_in_amt")
+        ofs_str   = json_val("issue_size_ofs_in_amt")
+        try:
+            fresh_amt = float(fresh_str or 0)
+            ofs_amt   = float(ofs_str or 0)
+            total_amt = fresh_amt + ofs_amt
+            if total_amt > 0:
+                result["fresh_pct"] = round(fresh_amt / total_amt * 100, 1)
+                result["ofs_pct"]   = round(ofs_amt   / total_amt * 100, 1)
+        except (ValueError, TypeError):
+            pass
+
+        # Use of proceeds — parse "Objects of the Issue" section
+        idx = html.lower().find("objects of the issue")
+        if idx >= 0:
+            section = html[idx: idx + 4000]
+            text = re.sub(r"<[^>]+>", " ", section)
+            text = re.sub(r"\s+", " ", text).lower()
+
+            # Identify which categories appear
+            has_capex   = bool(re.search(r"capital expenditure|capex|purchase of|product dev|invest|marketing|technology|r&d|research", text))
+            has_debt    = bool(re.search(r"repayment|prepayment|debt|borrow|loan", text))
+            has_wc      = bool(re.search(r"working capital", text))
+            has_general = bool(re.search(r"general corporate", text))
+
+            # Assign amounts to categories by keyword proximity
+            capex_amt = debt_amt = wc_amt = gen_amt = 0.0
+            lines = text.split(".")
+            for line in lines:
+                nums = re.findall(r"\b(\d+(?:\.\d+)?)\b", line)
+                if not nums:
+                    continue
+                try:
+                    amt = float(nums[-1])
+                except ValueError:
+                    continue
+                if amt < 0.1 or amt > 10000:
+                    continue
+                if re.search(r"capital expenditure|capex|purchase of|product dev|invest|marketing|technology|r&d|research|subsidiar", line):
+                    capex_amt += amt
+                elif re.search(r"repayment|prepayment|debt|borrow|loan", line):
+                    debt_amt += amt
+                elif re.search(r"working capital", line):
+                    wc_amt += amt
+                elif re.search(r"general corporate", line):
+                    gen_amt += amt
+
+            total_proceeds = capex_amt + debt_amt + wc_amt + gen_amt
+            if total_proceeds > 0:
+                result["proceeds_capex"]   = round(capex_amt / total_proceeds * 100, 1)
+                result["proceeds_debt"]    = round(debt_amt  / total_proceeds * 100, 1)
+                result["proceeds_wc"]      = round(wc_amt    / total_proceeds * 100, 1)
+                result["proceeds_general"] = round(gen_amt   / total_proceeds * 100, 1)
+            else:
+                # Fallback: assign 100% to whichever category is present
+                if has_capex and not has_general:
+                    result["proceeds_capex"] = 100.0
+                elif has_debt and not has_general:
+                    result["proceeds_debt"] = 100.0
+                elif has_wc and not has_general:
+                    result["proceeds_wc"] = 100.0
+                elif has_general:
+                    result["proceeds_general"] = 100.0
+
+        return result
+    except (requests.RequestException, ValueError):
+        return {}
+
+
 def scrape_lot_size(slug: str) -> Optional[int]:
     """Scrape lot size from Chittorgarh individual IPO page.
     Only called for recently closed IPOs missing lot size from InvestorGain."""
@@ -687,6 +956,23 @@ def build_ipo_list(year: int) -> list[IPO]:
             lot = scrape_lot_size(slug)
             if lot:
                 ipo.lot_size = lot
+
+    # Scrape promoter holding, OFS/fresh split, proceeds for Open/Upcoming IPOs
+    for ipo in ipos:
+        if ipo.status not in ("Open", "Upcoming"):
+            continue
+        slug = getattr(ipo, "_cg_slug", "")
+        if not slug:
+            continue
+        data = scrape_ipo_fundamentals(slug)
+        if data.get("promoter_pre")  is not None: ipo.promoter_pre  = data["promoter_pre"]
+        if data.get("promoter_post") is not None: ipo.promoter_post = data["promoter_post"]
+        if data.get("fresh_pct")     is not None: ipo.fresh_pct     = data["fresh_pct"]
+        if data.get("ofs_pct")       is not None: ipo.ofs_pct       = data["ofs_pct"]
+        ipo.proceeds_capex   = data.get("proceeds_capex",   0.0)
+        ipo.proceeds_debt    = data.get("proceeds_debt",    0.0)
+        ipo.proceeds_wc      = data.get("proceeds_wc",      0.0)
+        ipo.proceeds_general = data.get("proceeds_general", 0.0)
 
     return ipos
 
@@ -869,6 +1155,18 @@ def ipo_to_dict(ipo: IPO) -> dict:
         "memberApply":   ipo.member_apply,
         "memberAvoid":   ipo.member_avoid,
         "memberNeutral": ipo.member_neutral,
+        "promoterPre":    ipo.promoter_pre,
+        "promoterPost":   ipo.promoter_post,
+        "freshPct":       ipo.fresh_pct,
+        "ofsPct":         ipo.ofs_pct,
+        "proceedsCapex":  ipo.proceeds_capex,
+        "proceedsDebt":   ipo.proceeds_debt,
+        "proceedsWc":     ipo.proceeds_wc,
+        "proceedsGeneral":ipo.proceeds_general,
+        "compositeScore": ipo.composite_score["score"],
+        "compositeLabel": ipo.composite_score["label"],
+        "compositeFactors": {k: {"score": v["score"], "weight": v["weight"], "contribution": v["contribution"], "note": v["note"]} for k, v in ipo.composite_score["factors"].items()},
+        "compositeCappedBy": ipo.composite_score["capped_by"],
     }
 
 
@@ -929,7 +1227,7 @@ tr:hover td{background:rgba(29,78,216,.04)}
 .p-closed{background:rgba(148,163,184,.2);color:var(--text-3)}
 .pos{color:var(--green)}.neg{color:var(--red)}.dim{color:var(--text-3)}.amb{color:var(--amber)}
 .sig{font-family:var(--sans);font-size:11px;font-weight:700}
-.sig-promise{color:var(--green)}.sig-neutral{color:var(--amber)}.sig-caution{color:var(--red)}
+.sig-promise{color:var(--green)}.sig-buy{color:#16a34a}.sig-neutral{color:var(--amber)}.sig-caution{color:var(--red)}
 .str-exc{color:var(--green);font-weight:700}.str-str{color:#15803D}.str-avg{color:var(--amber)}.str-wk{color:var(--red)}
 .tag{display:inline-flex;align-items:center;padding:1px 6px;border-radius:3px;font-size:10px;font-family:var(--sans);font-weight:600}
 .tag-pos{background:rgba(21,128,61,.1);color:var(--green)}.tag-neg{background:rgba(185,28,28,.1);color:var(--red)}.tag-dim{background:rgba(148,163,184,.15);color:var(--text-3)}
@@ -1072,6 +1370,7 @@ function gmpTrend(ipo){
   return p>=0.66?'Rising':p<=0.33?'Falling':'Mixed';
 }
 function quickSig(ipo){
+  if(ipo.compositeScore!==null&&ipo.compositeScore!==undefined)return ipo.compositeLabel||'-';
   if(ipo.overallSub===null)return'-';
   var sc={Weak:0,Average:1,Strong:2,Exceptional:3}[subStr(ipo)]||0;
   if(ipo.gmpPct!==null){if(ipo.gmpPct<0)sc-=2;else if(ipo.gmpPct>=20)sc+=2;else if(ipo.gmpPct>=5)sc+=1;}
@@ -1168,8 +1467,26 @@ function oddsCell(ipo){
 
 function sigCell(ipo){
   var s=quickSig(ipo);if(s==='-')return'<span class="dim">-</span>';
-  var c={'Strong Buy':'sig-promise','Not Sure, You Decide':'sig-neutral','Do Not Buy':'sig-caution'}[s];
-  return'<span class="sig '+c+'">'+s+'</span>';
+  var score=ipo.compositeScore;
+  var c={
+    'Strong Buy':'sig-promise','Buy':'sig-buy',
+    'Research Needed':'sig-neutral','Caution':'sig-caution',
+    'Avoid':'sig-caution','Do Not Buy':'sig-caution',
+    'Not Sure, You Decide':'sig-neutral'
+  }[s]||'sig-neutral';
+  var scoreStr=score!=null?'<span style="font-size:10px;opacity:.7;margin-left:4px">'+parseFloat(score).toFixed(1)+'/5</span>':'';
+  // Build tooltip from factors
+  var tip='';
+  if(ipo.compositeFactors){
+    var rows=Object.entries(ipo.compositeFactors).map(function(e){
+      var bars=Math.round(e[1].score*5);
+      var bar='';for(var i=0;i<5;i++)bar+=(i<bars?'█':'░');
+      return e[0]+': '+bar+' '+e[1].note;
+    });
+    tip=rows.join('&#10;');
+    if(ipo.compositeCappedBy)tip+='&#10;⚠ Capped: '+ipo.compositeCappedBy;
+  }
+  return'<span class="sig '+c+'" title="'+tip+'">'+s+scoreStr+'</span>';
 }
 
 function trendCell(ipo){
@@ -1319,7 +1636,7 @@ function renderSection(ipos,category){
     +'<th>Listing</th><th>Price Band</th><th>Min Invest</th>'
     +'<th>Sub</th><th>QIB</th><th>Retail</th>'
     +'<th>Allotment %</th><th>GMP / Listing</th><th>Trend</th>'
-    +'<th>Profit</th><th>ROI %</th><th>Sentiment \\uD83D\\uDD25</th><th>Signal \\u26a0</th>'
+    +'<th>Profit</th><th>ROI %</th><th>Sentiment \\uD83D\\uDD25</th><th>Rating /5 \\u26a0</th>'
     +'</tr></thead>'
     +'<tbody>'+rows+'</tbody></table></div></div>';
 }
@@ -1331,7 +1648,7 @@ function renderContent(){
   document.getElementById('ctrl-stats').textContent=mb+' mainboard \\u00b7 '+sme+' SME';
   document.getElementById('content').innerHTML=
     '<div class="main">'+renderSection(allIpos,'Mainboard')+renderSection(allIpos,'SME')+'</div>'
-    +'<div class="disclaimer">\\u26a0 <strong>Quick Signal</strong> is purely algorithmic (GMP% + subscription). It has no knowledge of business quality, promoter reputation, legal issues, or market manipulation. <strong>SME IPOs</strong> have lower regulatory scrutiny, thin liquidity, and are more prone to GMP manipulation \\u2014 always do your own research before applying. <strong>Sentiment column</strong>: \\uD83D\\uDD25 = InvestorGain editorial rating (1\\u20135); Broker = analyst Apply/Avoid coverage. Data sourced from InvestorGain and Chittorgarh. Updated every 2 hours via GitHub Actions.</div>';
+    +'<div class="disclaimer">\\u26a0 <strong>Rating /5</strong> is a composite score combining 9 factors: QIB subscription (20%), promoter holding (15%), OFS% (15%), use of proceeds (10%), GMP% (10%), IG rating (10%), overall subscription (10%), allotment odds (5%), ROI% (5%). Hover the rating to see factor breakdown. SME IPOs get an 8% discount. Hard caps apply for red flags. Fundamentals data from Chittorgarh individual IPO pages.</div>';
 }
 
 function setStatus(s){
