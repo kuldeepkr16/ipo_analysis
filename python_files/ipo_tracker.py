@@ -1238,10 +1238,11 @@ function doRefresh(){
 (function init(){
   allIpos=loadIpos();
   var t=new Date(snap.generatedAt);
+  var ist=new Date(t.toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
   document.getElementById('updated-label').innerHTML=
     '<span class="live-dot"></span> '+
-    t.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' '+
-    t.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit'})+' UTC';
+    ist.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' '+
+    ist.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+' IST';
   renderContent();
 })();
 
