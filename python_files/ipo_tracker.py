@@ -1187,7 +1187,7 @@ body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:13
 .hdr-title{font-size:17px;font-weight:700;letter-spacing:-.025em}
 .hdr-sub{font-size:11px;color:var(--text-3);font-family:var(--mono)}
 .hdr-right{display:flex;align-items:center;gap:12px}
-.updated{font-size:11px;font-family:var(--mono);color:var(--text-3);display:flex;align-items:center;gap:6px}
+.updated{font-size:11px;font-family:var(--mono);color:var(--text-3);display:flex;align-items:center;gap:6px;line-height:1.3}
 .live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.25}}
 .gh-badge{font-size:10.5px;padding:4px 10px;border-radius:5px;background:var(--surface-2);border:1px solid var(--border-2);color:var(--text-3);text-decoration:none;display:flex;align-items:center;gap:5px;transition:color .12s}
@@ -1662,17 +1662,37 @@ function doRefresh(){
   var btn=document.getElementById('refresh-btn');
   btn.classList.add('spinning');
   btn.disabled=true;
-  setTimeout(function(){window.location.href=window.location.href.split('?')[0]+'?_='+Date.now();},300);
+  // Show "Refreshing..." immediately so user sees feedback
+  var ts=document.getElementById('refresh-ts');
+  if(ts)ts.textContent='↻ Refreshing…';
+  setTimeout(function(){
+    window.location.href=window.location.href.split('?')[0]+'?_='+Date.now();
+  },400);
+}
+
+function toIST(d){return new Date(d.toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));}
+function fmtIST(d){
+  var ist=toIST(d);
+  return ist.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' '+
+         ist.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+' IST';
 }
 
 (function init(){
   allIpos=loadIpos();
-  var t=new Date(snap.generatedAt);
-  var ist=new Date(t.toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));
+
+  // Data timestamp — when GitHub Actions last regenerated the HTML (baked in)
+  var dataTime=fmtIST(new Date(snap.generatedAt));
+
+  // Refreshed timestamp — when this browser tab loaded the page (always current)
+  var refreshTime=fmtIST(new Date());
+
   document.getElementById('updated-label').innerHTML=
-    '<span class="live-dot"></span> '+
-    ist.toLocaleDateString('en-IN',{day:'2-digit',month:'short'})+' '+
-    ist.toLocaleTimeString('en-IN',{hour:'2-digit',minute:'2-digit',hour12:true})+' IST';
+    '<span class="live-dot"></span>'
+    +'<span style="display:flex;flex-direction:column;gap:1px;line-height:1.3">'
+    +'<span style="color:var(--text-2)">Data: '+dataTime+'</span>'
+    +'<span id="refresh-ts" style="color:var(--text-3);font-size:10px">\\u21bb Refreshed: '+refreshTime+'</span>'
+    +'</span>';
+
   renderContent();
 })();
 
