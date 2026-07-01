@@ -1232,7 +1232,7 @@ function doRefresh(){
   var btn=document.getElementById('refresh-btn');
   btn.classList.add('spinning');
   btn.disabled=true;
-  setTimeout(function(){window.location.reload(true);},300);
+  setTimeout(function(){window.location.href=window.location.href.split('?')[0]+'?_='+Date.now();},300);
 }
 
 (function init(){
