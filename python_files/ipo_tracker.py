@@ -263,7 +263,7 @@ class IPO:
         if self.rating is not None:
             ig_map = {5: 1.0, 4: 0.75, 3: 0.5, 2: 0.25, 1: 0.0}
             s = ig_map.get(self.rating, 0.3)
-            note = f"{self.rating}/5 🔥"
+            note = f"{self.rating}/5"
         else:
             s, note = 0.3, "No data"
         factors["IG Rating"] = {"score": s, "weight": 0.10, "note": note}
@@ -1510,14 +1510,14 @@ function sentimentCell(ipo){
   var html='<div class="sent-wrap">';
   var fires=ipo.rating||0;
 
-  // IG fire rating row (always shown)
-  var fireStr='';
-  for(var i=0;i<fires;i++)fireStr+='\\uD83D\\uDD25';
-  for(var i=fires;i<5;i++)fireStr+='<span style="opacity:.18">\\uD83D\\uDD25</span>';
+  // IG rating row — filled/empty dots, no emoji
+  var dotStr='';
+  for(var i=0;i<fires;i++)dotStr+='<span style="color:var(--amber)">&#9679;</span>';
+  for(var i=fires;i<5;i++)dotStr+='<span style="opacity:.25;color:var(--text-3)">&#9679;</span>';
   var igLabel=fires>=4?'<span class="snt-pos" style="font-size:9px">High</span>':fires>=3?'<span class="snt-dim" style="font-size:9px">Med</span>':fires>0?'<span class="snt-neg" style="font-size:9px">Low</span>':'<span class="snt-dim" style="font-size:9px">-</span>';
   html+='<div class="sent-row" title="InvestorGain editorial rating (1-5)">'
     +'<span class="sent-lbl">IG</span>'
-    +'<span class="sent-fire" style="font-size:10px">'+fireStr+'</span>'
+    +'<span style="font-size:9px;letter-spacing:1px">'+dotStr+'</span>'
     +' '+igLabel
     +'</div>';
 
@@ -1636,7 +1636,7 @@ function renderSection(ipos,category){
     +'<th>Listing</th><th>Price Band</th><th>Min Invest</th>'
     +'<th>Sub</th><th>QIB</th><th>Retail</th>'
     +'<th>Allotment %</th><th>GMP / Listing</th><th>Trend</th>'
-    +'<th>Profit</th><th>ROI %</th><th>Sentiment \\uD83D\\uDD25</th><th>Rating /5 \\u26a0</th>'
+    +'<th>Profit</th><th>ROI %</th><th>Sentiment</th><th>Rating /5 \\u26a0</th>'
     +'</tr></thead>'
     +'<tbody>'+rows+'</tbody></table></div></div>';
 }
