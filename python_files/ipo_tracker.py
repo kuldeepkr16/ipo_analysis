@@ -1850,7 +1850,12 @@ def main() -> None:
     console.print("[bold]Fetching live IPO data from Chittorgarh, InvestorGain and Groww...[/bold]")
     ipos = build_ipo_list(args.year)
     if not ipos:
-        console.print("[red]Could not fetch IPO data from InvestorGain — check connectivity / site structure.[/red]")
+        console.print("[red]Could not fetch IPO data — check connectivity / site may be blocking this IP.[/red]")
+        if args.output_html:
+            # In CI/dashboard mode keep the existing file unchanged so GitHub Pages
+            # isn't wiped out by a transient network block on the runner IP.
+            console.print("[yellow]Dashboard not updated; existing file retained.[/yellow]")
+            sys.exit(0)
         sys.exit(1)
 
     filtered = apply_filters(ipos, args)
