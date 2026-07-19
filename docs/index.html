@@ -157,11 +157,8 @@ tr:hover td{background:rgba(29,78,216,.04)}
 <script>
 var allIpos=[],statusFilter='open',sortBy='gmp',searchQuery='';
 var snap=window.IPO_SNAPSHOT;
-<<<<<<< HEAD
 // ---- Cloudflare Worker URL — set this after deploying cloudflare/worker.js ----
 var PROXY_URL='https://ipo-tracker.kuldeepkr16.workers.dev';
-=======
->>>>>>> fc5a0f4cd420e7043e648b7f5f892d92c4a9350d
 
 function parseD(s){if(!s)return null;var d=new Date(s+'T00:00:00');return isNaN(d.getTime())?null:d;}
 function today(){var d=new Date();d.setHours(0,0,0,0);return d;}
