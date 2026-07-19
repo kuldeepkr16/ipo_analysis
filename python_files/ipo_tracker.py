@@ -20,6 +20,7 @@ research, not a deterministic API.
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from dataclasses import dataclass, field
@@ -99,10 +100,19 @@ class IPO:
     iw_review: Optional[str] = None
 
     @property
+    def min_lots(self) -> int:
+        """Minimum lots required. SME IPOs need min ₹1 lakh per SEBI rules."""
+        if self.price_high is None or self.lot_size is None or self.price_high * self.lot_size == 0:
+            return 1
+        if self.category == "SME":
+            return max(1, math.ceil(100_000 / (self.price_high * self.lot_size)))
+        return 1
+
+    @property
     def min_investment(self) -> Optional[float]:
         if self.price_high is None or self.lot_size is None:
             return None
-        return round(self.price_high * self.lot_size, 2)
+        return round(self.price_high * self.lot_size * self.min_lots, 2)
 
     @property
     def day_label(self) -> str:
@@ -146,7 +156,7 @@ class IPO:
     def expected_profit(self) -> Optional[float]:
         if self.gmp is None or self.lot_size is None:
             return None
-        return round(self.gmp * self.lot_size, 0)
+        return round(self.gmp * self.lot_size * self.min_lots, 0)
 
     @property
     def roi_pct(self) -> Optional[float]:
@@ -1168,6 +1178,7 @@ def ipo_to_dict(ipo: IPO) -> dict:
         "priceLow":    ipo.price_low,
         "priceHigh":   ipo.price_high,
         "lotSize":     ipo.lot_size,
+        "minLots":     ipo.min_lots,
         "issueSizeCr": ipo.issue_size_cr,
         "pe":          ipo.pe,
         "gmp":         ipo.gmp,

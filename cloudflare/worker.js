@@ -41,6 +41,12 @@ function norm(n) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function minLots(category, priceHigh, lotSize) {
+  if (priceHigh === null || lotSize === null || priceHigh * lotSize === 0) return 1;
+  if (category === "SME") return Math.max(1, Math.ceil(100000 / (priceHigh * lotSize)));
+  return 1;
+}
+
 function stripHtml(s) {
   return (s || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -243,8 +249,9 @@ export default {
         const lotSize = ig.lotSize ?? null;
         const gmp = ig.gmp ?? null;
         const retailSub = sub.retailSub ?? null;
-        const expectedProfit = gmp !== null && lotSize !== null ? Math.round(gmp * lotSize) : null;
-        const minInv = priceHigh !== null && lotSize !== null ? Math.round(priceHigh * lotSize) : null;
+        const lots = minLots(category, priceHigh, lotSize);
+        const expectedProfit = gmp !== null && lotSize !== null ? Math.round(gmp * lotSize * lots) : null;
+        const minInv = priceHigh !== null && lotSize !== null ? Math.round(priceHigh * lotSize * lots) : null;
         const roiPct = expectedProfit !== null && minInv ? Math.round(expectedProfit / minInv * 1000) / 10 : null;
         const allotmentOdds = retailSub !== null && retailSub > 0 ? Math.round(Math.min(1 / retailSub * 100, 100) * 10) / 10 : null;
 
@@ -258,7 +265,7 @@ export default {
           openDate, closeDate, listingDate,
           boaDate: ig.boaDate || null,
           priceLow, priceHigh,
-          lotSize, issueSizeCr,
+          lotSize, minLots: lots, issueSizeCr,
           pe: ig.pe ?? null,
           gmp, gmpPct: ig.gmpPct ?? null,
           gmpLow: ig.gmpLow ?? null, gmpHigh: ig.gmpHigh ?? null,

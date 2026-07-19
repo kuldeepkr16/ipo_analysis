@@ -165,17 +165,60 @@ function toFloat(v){if(v===null||v===undefined||v==='')return null;var n=parseFl
 function bdays(s,e){if(!s||!e||e<s)return 0;var n=0,c=new Date(s);while(c<=e){var d=c.getDay();if(d&&d<6)n++;c.setDate(c.getDate()+1);}return n;}
 function normName(n){return n.toLowerCase().replace(/\b(ltd|limited|ipo|the)\b/g,'').replace(/[^a-z0-9]+/g,'');}
 
-function loadIpos(){
-  return snap.data.map(function(d){
-    return Object.assign({},d,{
+function recomputeInvestment(ipo){
+  var lots=minLots(ipo);
+  ipo.minLots=lots;
+  if(ipo.gmp!==null&&ipo.gmp!==undefined&&ipo.lotSize!==null)
+    ipo.expectedProfit=Math.round(ipo.gmp*ipo.lotSize*lots);
+  var mi=minInv(ipo);
+  if(mi!==null&&mi!==0&&ipo.expectedProfit!==null&&ipo.expectedProfit!==undefined)
+    ipo.roiPct=Math.round(ipo.expectedProfit/mi*1000)/10;
+  return ipo;
+}
+function hydrateIpos(rawList){
+  return rawList.map(function(d){
+    var ipo=Object.assign({},d,{
       openDate:parseD(d.openDate),closeDate:parseD(d.closeDate),
       boaDate:parseD(d.boaDate),listingDate:parseD(d.listingDate),
       sources:new Set(d.sources||[])
     });
+    return recomputeInvestment(ipo);
   });
 }
+function loadIpos(){return hydrateIpos(snap.data);}
 
-function minInv(ipo){return(ipo.priceHigh!==null&&ipo.lotSize!==null)?Math.round(ipo.priceHigh*ipo.lotSize):null;}
+function fetchLive(){
+  var year=new Date().getFullYear();
+  return fetch(PROXY_URL+'?year='+year)
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+    .then(function(json){
+      allIpos=hydrateIpos(json.ipos);
+      var dataTime=fmtIST(new Date(json.generatedAt));
+      var refreshTime=fmtIST(new Date());
+      document.getElementById('updated-label').innerHTML=
+        '<span class="live-dot"></span>'
+        +'<span style="display:flex;flex-direction:column;gap:1px;line-height:1.3">'
+        +'<span style="color:var(--text-2)">Data: '+dataTime+'</span>'
+        +'<span id="refresh-ts" style="color:var(--text-3);font-size:10px">↻ Refreshed: '+refreshTime+' • Live</span>'
+        +'</span>';
+      renderContent();
+    })
+    .catch(function(e){
+      console.warn('Live fetch failed, using snapshot:',e);
+      var ts=document.getElementById('refresh-ts');
+      if(ts)ts.textContent='↻ Snapshot (live fetch failed)';
+    });
+}
+
+function minLots(ipo){
+  if(ipo.priceHigh===null||ipo.lotSize===null||ipo.priceHigh*ipo.lotSize===0)return 1;
+  if(ipo.category==='SME')return Math.max(1,Math.ceil(100000/(ipo.priceHigh*ipo.lotSize)));
+  return 1;
+}
+function minInv(ipo){
+  if(ipo.priceHigh===null||ipo.lotSize===null)return null;
+  return Math.round(ipo.priceHigh*ipo.lotSize*minLots(ipo));
+}
 function dayLabel(ipo){
   var now=today();
   if(!ipo.openDate||!ipo.closeDate)return'-';
@@ -235,12 +278,17 @@ function subCell(ipo){
 }
 
 function listingProfit(ipo){
-  // Actual profit on listing: listing_gain_pct% of (issue price × lot size)
-  // Returns null when lot size unknown — caller will show gain% instead
   if(ipo.listingGainPct===null||ipo.listingGainPct===undefined)return null;
-  var mi=minInv(ipo);
+  var mi=minInv(ipo);  // already accounts for minLots
   if(mi===null)return null;
   return(ipo.listingGainPct/100)*mi;
+}
+function minInvCell(ipo){
+  var mi=minInv(ipo);
+  if(mi===null)return'-';
+  var lots=minLots(ipo);
+  var suffix=lots>1?' <span style="font-size:10px;color:var(--text-3)">×'+lots+' lots</span>':'';
+  return fmtMoney(mi)+suffix;
 }
 
 function profitCell(ipo){
@@ -412,7 +460,6 @@ function renderCards(ipos,category){
   var list=sortIpos(applyFilters(ipos.filter(function(i){return i.category===category;})));
   if(list.length===0)return'<div style="text-align:center;padding:24px;color:var(--text-3);font-style:italic;font-size:13px">No '+category+' IPOs match current filters.</div>';
   return list.map(function(ipo){
-    var mi=minInv(ipo);
     return'<div class="card">'
       +'<div class="card-hdr"><span class="card-name">'+ipo.name+'</span>'+sPill(ipo.status)+'</div>'
       +'<div class="card-grid">'
@@ -421,7 +468,7 @@ function renderCards(ipos,category){
       +'<div class="metric"><span class="metric-lbl">'+(ipo.status==='Closed'?'Listing Gain':'GMP')+'</span><span class="metric-val">'+gmpCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Allotment Odds</span><span class="metric-val">'+oddsCell(ipo)+'</span></div>'
       +'<div class="metric"><span class="metric-lbl">Subscription</span><span class="metric-val">'+subCell(ipo)+'</span></div>'
-      +'<div class="metric"><span class="metric-lbl">Min Invest</span><span class="metric-val">'+(mi!==null?fmtMoney(mi):'-')+'</span></div>'
+      +'<div class="metric"><span class="metric-lbl">Min Invest</span><span class="metric-val">'+minInvCell(ipo)+'</span></div>'
       +'</div>'
       +'<div style="padding-top:8px;border-top:1px solid var(--border)">'+sentimentCell(ipo)+'</div>'
       +'<div class="card-footer"><span class="card-day">'+dayLabel(ipo)+' \u00b7 Closes '+closingCell(ipo)+'</span>'+sigCell(ipo)+'</div>'
@@ -436,7 +483,6 @@ function renderSection(ipos,category){
   var rows=list.length===0
     ?'<tr class="empty-row"><td colspan="'+cols+'">No '+category+' IPOs match current filters.</td></tr>'
     :list.map(function(ipo){
-      var mi=minInv(ipo);
       return'<tr>'
         +'<td class="td-name" title="'+ipo.name+'">'+ipo.name+'</td>'
         +'<td>'+sPill(ipo.status)+'</td>'
@@ -444,7 +490,7 @@ function renderSection(ipos,category){
         +'<td>'+closingCell(ipo)+'</td>'
         +'<td>'+fmtDate(ipo.listingDate)+'</td>'
         +'<td>'+priceBand(ipo)+'</td>'
-        +'<td>'+(mi!==null?fmtMoney(mi):'-')+'</td>'
+        +'<td>'+minInvCell(ipo)+'</td>'
         +'<td>'+subCell(ipo)+'</td>'
         +'<td>'+fmtSub(ipo.qibSub)+'</td>'
         +'<td>'+fmtSub(ipo.retailSub)+'</td>'
@@ -496,12 +542,19 @@ function doRefresh(){
   var btn=document.getElementById('refresh-btn');
   btn.classList.add('spinning');
   btn.disabled=true;
-  // Show "Refreshing..." immediately so user sees feedback
   var ts=document.getElementById('refresh-ts');
   if(ts)ts.textContent='↻ Refreshing…';
-  setTimeout(function(){
-    window.location.href=window.location.href.split('?')[0]+'?_='+Date.now();
-  },400);
+  if(PROXY_URL){
+    fetchLive().then(function(){
+      btn.classList.remove('spinning');btn.disabled=false;
+    },function(){
+      btn.classList.remove('spinning');btn.disabled=false;
+    });
+  } else {
+    setTimeout(function(){
+      window.location.href=window.location.href.split('?')[0]+'?_='+Date.now();
+    },400);
+  }
 }
 
 function toIST(d){return new Date(d.toLocaleString('en-US',{timeZone:'Asia/Kolkata'}));}
@@ -512,22 +565,24 @@ function fmtIST(d){
 }
 
 (function init(){
+  // Render snapshot instantly so page is usable immediately
   allIpos=loadIpos();
-
-  // Data timestamp — when GitHub Actions last regenerated the HTML (baked in)
   var dataTime=fmtIST(new Date(snap.generatedAt));
-
-  // Refreshed timestamp — when this browser tab loaded the page (always current)
   var refreshTime=fmtIST(new Date());
-
   document.getElementById('updated-label').innerHTML=
     '<span class="live-dot"></span>'
     +'<span style="display:flex;flex-direction:column;gap:1px;line-height:1.3">'
     +'<span style="color:var(--text-2)">Data: '+dataTime+'</span>'
     +'<span id="refresh-ts" style="color:var(--text-3);font-size:10px">\u21bb Refreshed: '+refreshTime+'</span>'
     +'</span>';
-
   renderContent();
+
+  // Silently fetch live data from Cloudflare Worker and re-render
+  if(PROXY_URL){
+    var ts=document.getElementById('refresh-ts');
+    if(ts)ts.textContent='\u21bb Loading live data\u2026';
+    fetchLive();
+  }
 })();
 
 // PIN lock
