@@ -151,7 +151,7 @@ function bdays(s,e){if(!s||!e||e<s)return 0;var n=0,c=new Date(s);while(c<=e){va
 function normName(n){return n.toLowerCase().replace(/\b(ltd|limited|ipo|the)\b/g,'').replace(/[^a-z0-9]+/g,'');}
 
 function recomputeInvestment(ipo){
-  var lots=minLots(ipo);
+  var lots=(ipo.minLots&&ipo.minLots>1)?ipo.minLots:minLots(ipo);
   ipo.minLots=lots;
   if(ipo.gmp!==null&&ipo.gmp!==undefined&&ipo.lotSize!==null)
     ipo.expectedProfit=Math.round(ipo.gmp*ipo.lotSize*lots);

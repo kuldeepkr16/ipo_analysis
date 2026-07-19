@@ -122,6 +122,25 @@ function compositeScore(ipo) {
   return { score, label, factors: F, capped_by: cappedBy };
 }
 
+async function scrapeMinLots(slug, lotSize) {
+  if (!slug || !lotSize) return null;
+  try {
+    const r = await fetch(`https://www.chittorgarh.com/ipo/${slug}/`, {
+      headers: { "User-Agent": UA, "Referer": CG },
+    });
+    if (!r.ok) return null;
+    const text = await r.text();
+    const clean = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+    // "minimum amount... ₹X,XX,XXX (N,NNN shares)"
+    const m = clean.match(/minimum amount[^₹]*₹[\d,]+\s*\(([\d,]+)\s*shares?\)/i);
+    if (m) {
+      const minShares = parseInt(m[1].replace(/,/g, ""));
+      return Math.max(1, Math.ceil(minShares / lotSize));
+    }
+  } catch { /* ignore */ }
+  return null;
+}
+
 export default {
   async fetch(request) {
     if (request.method === "OPTIONS") {
@@ -302,6 +321,21 @@ export default {
 
         ipos.push(ipo);
       }
+
+      // Scrape actual min lots from CG pages for Open/Upcoming IPOs in parallel
+      await Promise.all(
+        ipos
+          .filter(i => (i.status === "Open" || i.status === "Upcoming") && i.cgSlug && i.lotSize)
+          .map(async i => {
+            const scraped = await scrapeMinLots(i.cgSlug, i.lotSize);
+            if (scraped !== null && scraped !== i.minLots) {
+              i.minLots = scraped;
+              i.expectedProfit = i.gmp !== null ? Math.round(i.gmp * i.lotSize * scraped) : null;
+              const mi = i.priceHigh !== null ? Math.round(i.priceHigh * i.lotSize * scraped) : null;
+              i.roiPct = i.expectedProfit !== null && mi ? Math.round(i.expectedProfit / mi * 1000) / 10 : null;
+            }
+          })
+      );
 
       return new Response(
         JSON.stringify({ ipos, generatedAt: new Date().toISOString() }),
