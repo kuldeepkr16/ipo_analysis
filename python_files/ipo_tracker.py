@@ -62,6 +62,7 @@ class IPO:
     price_low: Optional[float] = None
     price_high: Optional[float] = None
     lot_size: Optional[int] = None
+    min_lots_scraped: Optional[int] = None  # from CG page; overrides formula when set
     issue_size_cr: Optional[float] = None
     pe: Optional[float] = None
     gmp: Optional[float] = None
@@ -101,7 +102,10 @@ class IPO:
 
     @property
     def min_lots(self) -> int:
-        """Minimum lots required. SME IPOs need min ₹1 lakh per SEBI rules."""
+        """Minimum lots required. Uses scraped value from CG page when available,
+        else falls back to SEBI ₹1 lakh rule for SME."""
+        if self.min_lots_scraped is not None:
+            return self.min_lots_scraped
         if self.price_high is None or self.lot_size is None or self.price_high * self.lot_size == 0:
             return 1
         if self.category == "SME":
@@ -821,23 +825,42 @@ def scrape_ipo_fundamentals(slug: str) -> dict:
         return {}
 
 
-def scrape_lot_size(slug: str) -> Optional[int]:
-    """Scrape lot size from Chittorgarh individual IPO page.
-    Only called for recently closed IPOs missing lot size from InvestorGain."""
+def scrape_lot_size(slug: str) -> tuple[Optional[int], Optional[int]]:
+    """Scrape lot size and retail minimum lots from Chittorgarh individual IPO page.
+    Returns (lot_size, min_lots_retail). min_lots_retail is None when not found."""
     try:
         url = f"https://www.chittorgarh.com/ipo/{slug}/"
         resp = requests.get(url, headers=CG_HEADERS, timeout=TIMEOUT)
         resp.raise_for_status()
         text = resp.text[:100000]
-        # CG format: "Lot Size</...><td...><span...>1,000 Shares</span>"
+        clean = re.sub(r'<[^>]+>', ' ', text)
+        clean = re.sub(r'\s+', ' ', clean)
+
+        lot_size: Optional[int] = None
+        min_lots_retail: Optional[int] = None
+
+        # Lot size: "lot size for an application is 2,000 shares"
         m = re.search(r'[Ll]ot\s+[Ss]ize.*?>([\d,]+)\s*[Ss]hares?', text, re.DOTALL)
         if not m:
-            m = re.search(r'minimum of ([\d,]+)\s*[Ss]hares?', text, re.IGNORECASE)
+            m = re.search(r'lot size for an application is ([\d,]+)\s*shares?', clean, re.IGNORECASE)
+        if not m:
+            m = re.search(r'minimum of ([\d,]+)\s*[Ss]hares?', clean, re.IGNORECASE)
         if m:
-            return int(m.group(1).replace(",", ""))
+            lot_size = int(m.group(1).replace(",", ""))
+
+        # Retail minimum: "minimum amount... ₹X,XX,XXX (N shares)"
+        rm = re.search(
+            r'minimum amount[^₹]*₹[\d,]+\s*\(([\d,]+)\s*shares?\)',
+            clean, re.IGNORECASE
+        )
+        if rm and lot_size:
+            min_shares = int(rm.group(1).replace(",", ""))
+            min_lots_retail = max(1, math.ceil(min_shares / lot_size))
+
+        return lot_size, min_lots_retail
     except (requests.RequestException, ValueError):
         pass
-    return None
+    return None, None
 
 
 def scrape_ipowatch_review(slug: str) -> Optional[str]:
@@ -994,17 +1017,26 @@ def build_ipo_list(year: int) -> list[IPO]:
     for ipo in needs_lot:
         slug = getattr(ipo, "_cg_slug", "")
         if slug:
-            lot = scrape_lot_size(slug)
+            lot, min_lots_r = scrape_lot_size(slug)
             if lot:
                 ipo.lot_size = lot
+            if min_lots_r is not None:
+                ipo.min_lots_scraped = min_lots_r
 
-    # Scrape promoter holding, OFS/fresh split, proceeds for Open/Upcoming IPOs
+    # Scrape min lots + fundamentals for Open/Upcoming IPOs
     for ipo in ipos:
         if ipo.status not in ("Open", "Upcoming"):
             continue
         slug = getattr(ipo, "_cg_slug", "")
         if not slug:
             continue
+        if ipo.lot_size is None or ipo.min_lots_scraped is None:
+            lot, min_lots_r = scrape_lot_size(slug)
+            if lot and ipo.lot_size is None:
+                ipo.lot_size = lot
+            if min_lots_r is not None:
+                ipo.min_lots_scraped = min_lots_r
+
         data = scrape_ipo_fundamentals(slug)
         if data.get("promoter_pre")  is not None: ipo.promoter_pre  = data["promoter_pre"]
         if data.get("promoter_post") is not None: ipo.promoter_post = data["promoter_post"]
