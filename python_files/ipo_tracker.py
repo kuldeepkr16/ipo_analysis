@@ -390,6 +390,14 @@ def parse_money_cr(text: str) -> Optional[float]:
     return float(m.group(1).replace(",", "")) if m else None
 
 
+def safe_float(text: Optional[str]) -> Optional[float]:
+    """float() that tolerates upstream placeholders like '-', '--' or '.'."""
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
 def strip_html(text: str) -> str:
     return re.sub(r"<[^>]+>", "", text or "").strip()
 
@@ -538,14 +546,14 @@ def fetch_investorgain_lookup(year: int) -> dict[str, dict]:
 
         gmp_text = row.get("GMP", "")
         gmp_match = re.search(r"<b>(-?[\d.]+|--)</b>\s*\(([-\d.]+)%\)", gmp_text)
-        gmp = None if not gmp_match or gmp_match.group(1) == "--" else float(gmp_match.group(1))
-        gmp_pct = float(gmp_match.group(2)) if gmp_match and gmp is not None else None
+        gmp = safe_float(gmp_match.group(1)) if gmp_match else None
+        gmp_pct = safe_float(gmp_match.group(2)) if gmp_match else None
         range_match = re.search(
             r"<b>(-?[\d.]+)\s*(?:\\u2193|↓)\s*/\s*(-?[\d.]+)\s*(?:\\u2191|↑)</b>",
             gmp_text,
         )
-        gmp_low = float(range_match.group(1)) if range_match else gmp
-        gmp_high = float(range_match.group(2)) if range_match else gmp
+        gmp_low = safe_float(range_match.group(1)) if range_match else gmp
+        gmp_high = safe_float(range_match.group(2)) if range_match else gmp
 
         sub_text = row.get("Sub", "-")
         overall_sub = None
